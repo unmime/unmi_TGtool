@@ -323,6 +323,36 @@ def main():
     calc.set_settings(ans_on=True)
     check("开启时 /00 算退出", calc.is_cont_exit("/00"), True)
 
+    # -------------------------------------------------------- 并发与持久化安全
+    print("[12] 并发写设置文件（线程安全 + 原子写）")
+    import threading as _th
+    import json as _json
+    _d2 = _tf.mkdtemp()
+    calc.SETTINGS_FILE = os.path.join(_d2, "calc_settings.json")
+    calc.set_settings(ans_on=True, decimals=4, fmt="eq", conv_on=True, conv_mode="acct")
+    calc.clear_ans()
+    _errs = []
+
+    def _worker(i):
+        for j in range(40):
+            calc._SETTINGS_CACHE = None           # 强制读文件，放大竞态窗口
+            try:
+                calc.format_result("%d*%d" % (i, j))
+                _json.load(open(calc.SETTINGS_FILE, encoding="utf-8"))
+            except Exception as e:  # noqa: BLE001
+                _errs.append("%s: %s" % (type(e).__name__, e))
+
+    _ts = [_th.Thread(target=_worker, args=(i,)) for i in range(10)]
+    for t in _ts:
+        t.start()
+    for t in _ts:
+        t.join()
+    check("10 线程并发写异常数", len(_errs), 0)
+    _final = _json.load(open(calc.SETTINGS_FILE, encoding="utf-8"))
+    for _k in ("decimals", "fmt", "conv_on", "conv_mode", "ans_on"):
+        check(u"设置项保留 %s" % _k, _k in _final, True)
+    check("无 .tmp 残留", os.path.exists(calc.SETTINGS_FILE + ".tmp"), False)
+
     # ------------------------------------------------------------------ 汇总
     print()
     print("=" * 56)

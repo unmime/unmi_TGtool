@@ -12,6 +12,7 @@ import json
 import math
 import os
 import re
+import threading
 import time
 import warnings
 from fractions import Fraction
@@ -382,12 +383,6 @@ def _eval(node, depth):
 # 结果格式化
 # ---------------------------------------------------------------------------
 
-def _is_finite_decimal(fr):
-    d = abs(fr.denominator)
-    for p in (2, 5):
-        while d % p == 0:
-            d //= p
-    return d == 1
 
 
 DEFAULT_SETTINGS = {"decimals": DEFAULT_DECIMALS, "fmt": "paren",
@@ -433,23 +428,51 @@ def get_settings():
     return s
 
 
-def set_settings(**kv):
-    """合并写入设置，返回生效后的完整设置。"""
-    global _SETTINGS_CACHE
-    data = {}
+_SETTINGS_LOCK = threading.Lock()
+
+
+def _read_raw():
+    """读原始设置字典（不做校验，供写操作使用）。"""
     try:
         with open(SETTINGS_FILE, "r", encoding="utf-8") as fh:
-            data = json.load(fh) or {}
+            return json.load(fh) or {}
     except Exception:  # noqa: BLE001
-        data = {}
-    data.update(kv)
-    try:
-        with open(SETTINGS_FILE, "w", encoding="utf-8") as fh:
-            json.dump(data, fh)
-    except Exception:  # noqa: BLE001
-        pass
-    _SETTINGS_CACHE = None               # 写后失效，下次读重新加载
+        return {}
+
+
+def _update_settings(kv):
+    """设置文件的唯一写入口：加锁 + 原子替换。
+
+    两个必须同时做的保护：
+    1. 加锁 —— bot 是多线程处理消息的，并发「读-改-写」会互相覆盖导致设置项丢失
+    2. 原子替换 —— 直接 open(w) 会在写入途中把文件截断成空文件，
+                   此时另一个线程读到空内容，用户的设置就全没了。
+       改成写临时文件 + os.replace（同分区内是原子操作）。
+    """
+    global _SETTINGS_CACHE
+    with _SETTINGS_LOCK:
+        data = _read_raw()
+        data.update(kv)
+        tmp = SETTINGS_FILE + ".tmp"
+        try:
+            with open(tmp, "w", encoding="utf-8") as fh:
+                json.dump(data, fh)
+                fh.flush()
+                os.fsync(fh.fileno())
+            os.replace(tmp, SETTINGS_FILE)
+        except Exception:  # noqa: BLE001
+            try:
+                if os.path.exists(tmp):
+                    os.remove(tmp)
+            except Exception:  # noqa: BLE001
+                pass
+        _SETTINGS_CACHE = None           # 写后失效，下次读重新加载
     return get_settings()
+
+
+def set_settings(**kv):
+    """合并写入设置，返回生效后的完整设置。"""
+    return _update_settings(kv)
 
 
 def get_decimals():
@@ -488,45 +511,17 @@ def get_ans():
 
 
 def set_ans(value):
-    """记录本次结果，供下次 ans 引用。以分数字符串落盘，精度不丢。"""
-    data = {}
-    try:
-        with open(SETTINGS_FILE, "r", encoding="utf-8") as fh:
-            data = json.load(fh) or {}
-    except Exception:  # noqa: BLE001
-        data = {}
-    data["ans"] = str(value)
-    data["ans_ts"] = time.time()          # 记录时间戳，用于 3 分钟自动退出
-    try:
-        with open(SETTINGS_FILE, "w", encoding="utf-8") as fh:
-            json.dump(data, fh)
-    except Exception:  # noqa: BLE001
-        pass
-    if _SETTINGS_CACHE is not None:
-        _SETTINGS_CACHE["ans"] = str(value)
-        _SETTINGS_CACHE["ans_ts"] = data["ans_ts"]
+    """记录本次结果，供下次 ans 引用。以分数字符串落盘，精度不丢。
+
+    走 _update_settings（加锁 + 原子写），避免并发覆盖掉其它设置项。
+    """
+    _update_settings({"ans": str(value), "ans_ts": time.time()})
     return value
 
 
 def clear_ans():
     """清除连续计算记录（/00 或关闭开关时调用）。"""
-    data = {}
-    try:
-        with open(SETTINGS_FILE, "r", encoding="utf-8") as fh:
-            data = json.load(fh) or {}
-    except Exception:  # noqa: BLE001
-        data = {}
-    data["ans"] = None
-    data["ans_ts"] = 0
-    try:
-        with open(SETTINGS_FILE, "w", encoding="utf-8") as fh:
-            json.dump(data, fh)
-    except Exception:  # noqa: BLE001
-        pass
-    global _SETTINGS_CACHE
-    if _SETTINGS_CACHE is not None:
-        _SETTINGS_CACHE["ans"] = None
-        _SETTINGS_CACHE["ans_ts"] = 0
+    _update_settings({"ans": None, "ans_ts": 0})
 
 
 def _ans_missing_hint():
@@ -616,25 +611,28 @@ def _sci_str(fr, digits=6):
 
 
 def format_value(fr):
-    """Fraction -> (数字字符串, 是否近似)
+    """Fraction -> (数字字符串, 近似类型)
 
     一律输出纯数字（不带千分位），保证从 Telegram 复制出去可以直接粘贴使用。
     小数位数由 get_decimals() 决定。全程整数/Fraction 运算，大数不失真。
+
+    第二个返回值："" 精确 / "round" 定点四舍五入 / "sci" 科学计数法。
+    科学计数法不是「保留 N 位小数」，必须让调用方能区分，文案才说得准。
     """
     nd = get_decimals()
     if fr.denominator == 1:
-        return str(fr.numerator), False
+        return str(fr.numerator), ""
     # 超大 / 超小走科学计数法（nd 位定点表示不出来时）
     a = abs(fr)
     if fr != 0 and (a >= Fraction(10) ** 15 or a <= Fraction(1, 10 ** 12)):
-        return _sci_str(fr), True
+        return _sci_str(fr), "sci"
     s = _frac_to_str(fr, nd)
     if s in ("", "-", "-0", "0"):
         s = "0"
     # 是否近似：四舍五入后的值与原值不相等
     q, _ = _round_frac(fr, nd)
     approx = (Fraction(q, 10 ** nd) if nd else Fraction(q)) != fr
-    return s, approx
+    return s, ("round" if approx else "")
 
 
 # ---------------------------------------------------------------------------
@@ -808,7 +806,9 @@ def calc_msgs(raw):
         line = "<code>%s=%s</code>" % (esc(shown), esc(text))
     else:                                        # 算式=结果｜结果｜（竖线在 code 外，只复制数字）
         line = "<code>%s=%s</code>｜<code>%s</code>｜" % (esc(shown), esc(text), esc(text))
-    if approx:
+    if approx == "sci":
+        line += "\n<i>≈ 数值过大或过小，已用科学计数法表示</i>"
+    elif approx:
         line += "\n<i>≈ 已四舍五入到 %d 位小数</i>" % st["decimals"]
     msgs = [(line, None)]   # 结果不带按钮，设置走 /calc 菜单
     # 结果转换单独发一条，「前缀」写在 code 外面，点击只复制内容本身
@@ -843,11 +843,6 @@ def calc(raw):
 # ---------------------------------------------------------------------------
 # 设置面板（Telegram 内联按钮版）
 # ---------------------------------------------------------------------------
-
-def result_kb():
-    """结果消息下方的设置入口。"""
-    return [[{"text": u"⚙️ 设置", "callback_data": "calcset:open"}]]
-
 
 def _tag(label, selected):
     """选中的选项后面挂一个绿色圆点 🟢。"""
