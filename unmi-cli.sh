@@ -140,7 +140,62 @@ do_log() { journalctl -u "$SERVICE" -n 30 --no-pager; }
 # ---- 6. 重启 ----
 do_restart() { systemctl restart "$SERVICE" && ok "已重启"; }
 
-# ---- 7. 一键卸载 ----
+# ---- 7. 一键更新（拉 GitHub 最新版，保留配置与数据）----
+do_update() {
+  echo -e "${C_BOLD}  一键更新${C_RESET}"
+  local latest cur
+  # 当前版本（安装/上次更新时写入的 VERSION 文件）
+  cur="未知"
+  [ -f "$APP_DIR/VERSION" ] && cur="$(cat "$APP_DIR/VERSION" 2>/dev/null)"
+  echo "    当前版本: $cur"
+
+  # 查最新版本（走代理，如果有）
+  latest="$(curl -fsSL --connect-timeout 12 $(proxy_args) \
+    "https://api.github.com/repos/wazakid/unmi_TGtool/releases/latest" 2>/dev/null \
+    | grep -oE '"tag_name":[[:space:]]*"[^"]+"' | head -1 | cut -d'"' -f4)"
+  [ -z "$latest" ] && { err "获取最新版本失败（网络问题，国内先配代理）"; return; }
+  echo "    最新版本: $latest"
+  if [ "$cur" = "$latest" ]; then
+    ok "已经是最新版本，无需更新"
+    return
+  fi
+  printf "    确认更新到 %s？[y/N] " "$latest"; read -r ans
+  [ "$ans" = "y" ] || { warn "已取消"; return; }
+
+  # 下载
+  local tmp; tmp="$(mktemp -d)"
+  echo "    下载中…"
+  curl -fsSL --connect-timeout 20 $(proxy_args) \
+    "https://github.com/wazakid/unmi_TGtool/releases/download/${latest}/unmi_TGtool.tar.gz" \
+    -o "$tmp/pkg.tar.gz" 2>/dev/null \
+    || { err "下载失败（网络问题）"; rm -rf "$tmp"; return; }
+  ok "已下载"
+
+  # 备份用户数据（设置等）
+  cp -r "$APP_DIR/data" "$tmp/data_bak" 2>/dev/null || true
+
+  # 解压并覆盖程序文件（保留 data 与 /etc 下的配置）
+  tar xzf "$tmp/pkg.tar.gz" -C "$tmp"
+  rm -rf "$APP_DIR/core" "$APP_DIR/modules"
+  cp -r "$tmp/unmi_TGtool/core" "$tmp/unmi_TGtool/modules" "$APP_DIR/"
+  cp "$tmp/unmi_TGtool/main.py" "$tmp/unmi_TGtool/TGcalc_bot.py" "$APP_DIR/"
+  [ -f "$tmp/unmi_TGtool/selftest_public.py" ] && cp "$tmp/unmi_TGtool/selftest_public.py" "$APP_DIR/"
+  [ -f "$tmp/unmi_TGtool/selftest_calc.py" ] && cp "$tmp/unmi_TGtool/selftest_calc.py" "$APP_DIR/"
+  # 恢复数据
+  mkdir -p "$APP_DIR/data"
+  cp -r "$tmp/data_bak/." "$APP_DIR/data/" 2>/dev/null || true
+  # 记录版本
+  echo "$latest" > "$APP_DIR/VERSION"
+  # 同步更新 unmi 命令本身
+  [ -f "$tmp/unmi_TGtool/unmi-cli.sh" ] && install -m 755 "$tmp/unmi_TGtool/unmi-cli.sh" /usr/local/bin/unmi
+  rm -rf "$tmp"
+  ok "已更新到 $latest（配置与数据已保留）"
+
+  # 重启生效
+  systemctl restart "$SERVICE" && ok "服务已重启，新版本生效"
+}
+
+# ---- 8. 一键卸载 ----
 do_uninstall() {
   echo -e "${C_RED}${C_BOLD}  一键卸载 unmi_TGtool${C_RESET}"
   echo "    将删除：$APP_DIR、$ENV_FILE、systemd 服务、unmi 命令"
@@ -171,7 +226,8 @@ menu() {
   echo -e "  ${C_CYAN}4${C_RESET}) 配置代理（国内连不上 Telegram 时用）"
   echo -e "  ${C_CYAN}5${C_RESET}) 查看日志"
   echo -e "  ${C_CYAN}6${C_RESET}) 重启服务"
-  echo -e "  ${C_CYAN}7${C_RESET}) 一键卸载"
+  echo -e "  ${C_CYAN}7${C_RESET}) 一键更新"
+  echo -e "  ${C_CYAN}8${C_RESET}) 一键卸载"
   echo -e "  ${C_CYAN}0${C_RESET}) 退出"
   echo
 }
@@ -180,7 +236,7 @@ main() {
   [ "$(id -u)" -ne 0 ] && { err "需要 root（sudo unmi）"; exit 1; }
   while :; do
     menu
-    printf "  请选择 [0-7]: "; read -r n
+    printf "  请选择 [0-8]: "; read -r n
     case "$n" in
       1) do_status ;;
       2) do_config_bot ;;
@@ -188,7 +244,8 @@ main() {
       4) do_config_proxy ;;
       5) do_log ;;
       6) do_restart ;;
-      7) do_uninstall ;;
+      7) do_update ;;
+      8) do_uninstall ;;
       0|q) echo "  再见"; exit 0 ;;
       *) warn "无效选项" ;;
     esac

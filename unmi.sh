@@ -14,7 +14,7 @@
 set -euo pipefail
 
 # ---- 常量 ----
-VERSION="v2.0.2"
+VERSION="v2.0.3"
 REPO="wazakid/unmi_TGtool"
 TAR_URL="https://github.com/${REPO}/releases/download/${VERSION}/unmi_TGtool.tar.gz"
 APP_DIR="/opt/unmi_TGtool"
@@ -107,6 +107,7 @@ download() {
   mkdir -p "$APP_DIR"
   # tar 包含顶层目录 unmi_TGtool/，用 --strip-components=1 去掉后直接落在 APP_DIR
   tar xzf "$TMP_DIR/pkg.tar.gz" -C "$APP_DIR" --strip-components=1
+  echo "$VERSION" > "$APP_DIR/VERSION"    # 记录版本，供 unmi 面板显示/一键更新比对
   ok "文件就绪（$(find "$APP_DIR" -type f | wc -l | tr -d ' ') 个文件）"
 }
 
