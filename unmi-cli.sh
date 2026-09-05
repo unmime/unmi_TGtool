@@ -1,43 +1,353 @@
 #!/usr/bin/env bash
 #===============================================================================
-# unmi — unmi_TGtool 终端控制面板
+# unmi — unmi_TGtool 控制台
 #
-# 在终端敲 `unmi` 即可调出。安装脚本会把它放到 /usr/local/bin/unmi。
+# 在终端敲 `unmi` 打开控制台：集中管理这台机器上的所有 Telegram 机器人。
+#   · 列出所有机器人（自动识别 bot 名 + 自定义名 + 运行状态）
+#   · 添加机器人（输 token 自动识别，可自定义名字）
+#   · 进入某个机器人做管理（配置 / 测试 / 代理 / 更新 / 卸载）
 #
-# 功能：查看状态 / 配置机器人 / 发送测试信息 / 配置代理 / 查看日志 /
-#       重启服务 / 一键卸载
+# 约定：
+#   主实例   /opt/unmi_TGtool           服务 unmi_TGtool           配置 /etc/unmi_TGtool.env
+#   其他实例 /opt/unmi_TGtool-<name>    服务 unmi_TGtool-<name>    配置 /etc/unmi_TGtool-<name>.env
 #===============================================================================
 set -uo pipefail
 
-APP_DIR="/opt/unmi_TGtool"
-ENV_FILE="/etc/unmi_TGtool.env"
-SERVICE="unmi_TGtool"
+BASE="/opt/unmi_TGtool"
+MAIN_SERVICE="unmi_TGtool"
+MAIN_ENV="/etc/unmi_TGtool.env"
 
 # ---- 颜色 ----
 if [ -t 1 ]; then
-  C_RESET=$'\033[0m'; C_BOLD=$'\033[1m'
+  C_RESET=$'\033[0m'; C_BOLD=$'\033[1m'; C_DIM=$'\033[2m'
   C_CYAN=$'\033[36m'; C_GREEN=$'\033[32m'; C_YELLOW=$'\033[33m'
-  C_RED=$'\033[31m'; C_PURPLE=$'\033[35m'
+  C_RED=$'\033[31m'; C_PURPLE=$'\033[35m'; C_BLUE=$'\033[34m'
 else
-  C_RESET=""; C_BOLD=""; C_CYAN=""; C_GREEN=""; C_YELLOW=""; C_RED=""; C_PURPLE=""
+  C_RESET=""; C_BOLD=""; C_DIM=""; C_CYAN=""; C_GREEN=""; C_YELLOW=""; C_RED=""; C_PURPLE=""; C_BLUE=""
 fi
 ok()   { echo -e "${C_GREEN}  [✓]${C_RESET} $*"; }
 warn() { echo -e "${C_YELLOW}  [!]${C_RESET} $*"; }
 err()  { echo -e "${C_RED}  [✗]${C_RESET} $*"; }
 
-# ---- 读配置 ----
-get_val() { grep -E "^$1=" "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2-; }
-TOKEN()  { get_val TG_BOT_TOKEN; }
-CHAT()   { get_val TG_CHAT_ID; }
-PROXY()  { get_val https_proxy; }
+#===============================================================================
+# 实例发现与信息
+#===============================================================================
 
-# 当前生效的代理（curl 用）
-proxy_args() {
-  local p; p="$(PROXY)"
-  [ -n "$p" ] && printf '%s' "-x $p" || printf ''
+# 输出每个实例一行：name|dir|env|service
+list_instances() {
+  [ -d "$BASE" ] && printf 'main|%s|%s|%s\n' "$BASE" "$MAIN_ENV" "$MAIN_SERVICE"
+  local d n
+  for d in "$BASE"-*/; do
+    [ -d "$d" ] || continue
+    n="$(basename "$d")"; n="${n#unmi_TGtool-}"
+    printf '%s|%s|%s|%s\n' "$n" "${d%/}" "/etc/unmi_TGtool-$n.env" "unmi_TGtool-$n"
+  done
 }
 
-# ---- 艺术字 ----
+get_val() { grep -E "^$2=" "$1" 2>/dev/null | head -1 | cut -d= -f2-; }
+
+# 该 env 生效的代理（拼成 curl 参数）
+proxy_args() { local p; p="$(get_val "$1" https_proxy)"; [ -n "$p" ] && printf -- '-x %s' "$p" || printf ''; }
+
+svc_state() {
+  if systemctl is-active --quiet "$1" 2>/dev/null; then
+    echo -e "${C_GREEN}运行中${C_RESET}"
+  else
+    echo -e "${C_RED}停止${C_RESET}"
+  fi
+}
+
+# bot 名：优先读缓存 data/botinfo，没有则 getMe 拉取并缓存。输出 "@username"（拿不到则空）
+bot_username() {  # $1=dir $2=env
+  local cache="$1/data/botinfo" token un
+  [ -f "$cache" ] && { cat "$cache" 2>/dev/null; return; }
+  token="$(get_val "$2" TG_BOT_TOKEN)"
+  [ -z "$token" ] && return
+  un="$(curl -fsSL --connect-timeout 10 $(proxy_args "$2") \
+        "https://api.telegram.org/bot${token}/getMe" 2>/dev/null \
+        | grep -oE '"username":"[^"]+"' | head -1 | cut -d'"' -f4)"
+  if [ -n "$un" ]; then
+    mkdir -p "$1/data" 2>/dev/null
+    echo "@$un" > "$cache" 2>/dev/null
+    echo "@$un"
+  fi
+}
+
+# 显示用名字：自定义名（INSTANCE_LABEL）优先，其次 @username，再次实例名
+display_name() {  # $1=name $2=dir $3=env
+  local label un
+  label="$(get_val "$3" INSTANCE_LABEL)"
+  [ -n "$label" ] && { echo "$label"; return; }
+  un="$(bot_username "$2" "$3")"
+  [ -n "$un" ] && { echo "$un"; return; }
+  echo "$1"
+}
+
+#===============================================================================
+# 添加机器人
+#===============================================================================
+
+add_bot() {
+  echo -e "${C_BOLD}  添加机器人${C_RESET}"
+  echo -e "  ${C_DIM}去 @BotFather 建 bot 拿 token；先给 bot 发条消息，再拿你的 chat id${C_RESET}"
+  echo
+
+  local token
+  while :; do
+    printf "  ${C_BOLD}Bot Token${C_RESET}（形如 123456:ABC-DEF...）: "; read -r token
+    printf '%s' "$token" | grep -qE '^[0-9]+:[A-Za-z0-9_-]{20,}$' && break
+    warn "token 格式不对，重新输入"
+  done
+
+  # 同 token 查重：这个 token 已被别的实例占用的话，两个进程会互相抢消息
+  local f
+  for f in /etc/unmi_TGtool*.env; do
+    [ -f "$f" ] || continue
+    if grep -q "^TG_BOT_TOKEN=${token}$" "$f" 2>/dev/null; then
+      warn "这个 token 已被实例（$f）占用，同 token 跑两个会互相抢消息"
+      printf "  仍要添加？[y/N] "; read -r c; [ "$c" = "y" ] || return
+    fi
+  done
+
+  # 代理（国内连不上时需要）
+  local proxy=""
+  if ! curl -fsSL --connect-timeout 6 -o /dev/null https://api.telegram.org 2>/dev/null; then
+    warn "直连 Telegram 不通（国内服务器需要代理）"
+    printf "  ${C_BOLD}代理地址${C_RESET}（如 http://127.0.0.1:7890，留空跳过）: "; read -r proxy
+  fi
+
+  # 自动识别 bot 名
+  echo -e "  ${C_DIM}正在识别机器人…${C_RESET}"
+  local px=""; [ -n "$proxy" ] && px="-x $proxy"
+  local me un fname
+  me="$(curl -fsSL --connect-timeout 12 $px "https://api.telegram.org/bot${token}/getMe" 2>/dev/null)"
+  un="$(printf '%s' "$me" | grep -oE '"username":"[^"]+"' | head -1 | cut -d'"' -f4)"
+  fname="$(printf '%s' "$me" | grep -oE '"first_name":"[^"]+"' | head -1 | cut -d'"' -f4)"
+  if [ -n "$un" ]; then
+    ok "识别到机器人：${C_BOLD}@${un}${C_RESET}（${fname}）"
+  else
+    warn "没能识别（token 可能不对，或网络不通）"
+    printf "  仍要继续添加？[y/N] "; read -r c; [ "$c" = "y" ] || return
+  fi
+
+  # 自定义名字（用于管理显示 + 目录/服务名）
+  local label slug
+  printf "  ${C_BOLD}给它起个名字${C_RESET}（用于管理，默认 @%s）: " "${un:-bot}"; read -r label
+  [ -z "$label" ] && label="${un:-bot}"
+  slug="$(printf '%s' "$label" | tr -cd 'A-Za-z0-9_-' | tr 'A-Z' 'a-z')"
+  [ -z "$slug" ] && slug="$(printf '%s' "$un" | tr -cd 'A-Za-z0-9_-' | tr 'A-Z' 'a-z')"
+  [ -z "$slug" ] && slug="bot$(date +%s)"
+
+  local dir env svc
+  # 第一个 bot 复用主实例（$BASE 的共享代码 + main 服务）；之后的 bot 各开新目录
+  if [ ! -f "$MAIN_ENV" ]; then
+    dir="$BASE"; env="$MAIN_ENV"; svc="$MAIN_SERVICE"
+  else
+    dir="$BASE-$slug"; env="/etc/unmi_TGtool-$slug.env"; svc="unmi_TGtool-$slug"
+  fi
+  if [ -f "$env" ]; then
+    warn "实例 $slug 已配置过（$env）"
+    printf "  覆盖重装？[y/N] "; read -r c; [ "$c" = "y" ] || return
+  fi
+
+  local chat
+  while :; do
+    printf "  ${C_BOLD}Chat ID${C_RESET}（纯数字）: "; read -r chat
+    printf '%s' "$chat" | grep -qE '^-?[0-9]+$' && break
+    warn "chat id 必须是数字，重新输入"
+  done
+
+  # 落地：复制程序、写 env、建服务、启动
+  echo -e "  ${C_DIM}创建实例 $slug …${C_RESET}"
+  if [ "$dir" != "$BASE" ]; then
+    mkdir -p "$dir"
+    cp -r "$BASE/core" "$BASE/modules" "$dir/" 2>/dev/null || true
+    cp "$BASE/main.py" "$BASE/TGcalc_bot.py" "$dir/" 2>/dev/null
+    [ -f "$BASE/VERSION" ] && cp "$BASE/VERSION" "$dir/"
+    mkdir -p "$dir/data"
+  fi
+  umask 077
+  {
+    echo "TG_BOT_TOKEN=$token"
+    echo "TG_CHAT_ID=$chat"
+    echo "DATA_DIR=$dir/data"
+    echo "INSTANCE_LABEL=$label"
+    [ -n "$proxy" ] && echo "https_proxy=$proxy"
+  } > "$env"
+  chmod 600 "$env"
+  [ -n "$un" ] && { mkdir -p "$dir/data"; echo "@$un" > "$dir/data/botinfo"; }
+
+  cat > "/etc/systemd/system/$svc.service" <<EOF
+[Unit]
+Description=unmi_TGtool bot ($label)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=$env
+WorkingDirectory=$dir
+ExecStart=/usr/bin/python3 $dir/main.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  systemctl daemon-reload
+  systemctl enable "$svc" >/dev/null 2>&1 || true
+  systemctl restart "$svc"
+  sleep 2
+  systemctl is-active --quiet "$svc" && ok "已启动：$svc" \
+    || { err "启动失败，看日志：journalctl -u $svc -n 20"; return; }
+
+  local resp
+  resp="$(curl -fsSL --connect-timeout 12 $px \
+    -d "chat_id=$chat" --data-urlencode "text=🎉 机器人「$label」已上线！发 66*98 试试。" \
+    -d "parse_mode=HTML" "https://api.telegram.org/bot${token}/sendMessage" 2>/dev/null)"
+  printf '%s' "$resp" | grep -q '"ok":true' \
+    && ok "测试消息已发到 Telegram" \
+    || warn "测试消息没发出去（可进该机器人选「发送测试」重试）"
+
+  echo
+  ok "机器人「$label」添加完成，发 66*98 就能用"
+}
+
+#===============================================================================
+# 单实例管理
+#===============================================================================
+
+set_current() {  # $1=name
+  CUR_NAME="$1"
+  if [ "$1" = "main" ]; then
+    CUR_DIR="$BASE"; CUR_ENV="$MAIN_ENV"; CUR_SVC="$MAIN_SERVICE"
+  else
+    CUR_DIR="$BASE-$1"; CUR_ENV="/etc/unmi_TGtool-$1.env"; CUR_SVC="unmi_TGtool-$1"
+  fi
+  CUR_LABEL="$(display_name "$CUR_NAME" "$CUR_DIR" "$CUR_ENV")"
+}
+
+cval()   { get_val "$CUR_ENV" "$1"; }
+cproxy() { local p; p="$(cval https_proxy)"; [ -n "$p" ] && printf -- '-x %s' "$p" || printf ''; }
+
+inst_status() {
+  echo -e "  名称:   ${C_BOLD}$CUR_LABEL${C_RESET}（实例 $CUR_NAME）"
+  echo -e "  运行:   $(svc_state "$CUR_SVC")"
+  echo    "  目录:   $CUR_DIR"
+  echo    "  配置:   $CUR_ENV"
+  local t c p v; t="$(cval TG_BOT_TOKEN)"; c="$(cval TG_CHAT_ID)"; p="$(cval https_proxy)"
+  v="?"; [ -f "$CUR_DIR/VERSION" ] && v="$(cat "$CUR_DIR/VERSION")"
+  echo    "  版本:   $v"
+  [ -n "$t" ] && echo "  token:  ${t:0:10}…（已配置）" || echo "  token:  未配置"
+  [ -n "$c" ] && echo "  chat:   $c" || echo "  chat:   未配置"
+  [ -n "$p" ] && echo "  代理:   $p" || echo "  代理:   未配置（直连）"
+}
+
+inst_config() {
+  local token chat dd proxy label
+  printf "  Bot Token: "; read -r token
+  printf '%s' "$token" | grep -qE '^[0-9]+:[A-Za-z0-9_-]{20,}$' || { err "格式不对"; return; }
+  printf "  Chat ID: "; read -r chat
+  printf '%s' "$chat" | grep -qE '^-?[0-9]+$' || { err "必须是数字"; return; }
+  dd="$(cval DATA_DIR)"; [ -z "$dd" ] && dd="$CUR_DIR/data"
+  proxy="$(cval https_proxy)"; label="$(cval INSTANCE_LABEL)"
+  umask 077
+  { echo "TG_BOT_TOKEN=$token"; echo "TG_CHAT_ID=$chat"; echo "DATA_DIR=$dd"
+    [ -n "$label" ] && echo "INSTANCE_LABEL=$label"; [ -n "$proxy" ] && echo "https_proxy=$proxy"; } > "$CUR_ENV"
+  chmod 600 "$CUR_ENV"
+  rm -f "$CUR_DIR/data/botinfo"
+  systemctl restart "$CUR_SVC" && ok "已保存并重启"
+}
+
+inst_test() {
+  local token chat; token="$(cval TG_BOT_TOKEN)"; chat="$(cval TG_CHAT_ID)"
+  [ -z "$token" ] || [ -z "$chat" ] && { err "先配置 token / chat_id"; return; }
+  echo "  发送中…（代理：$(cval https_proxy || echo 无)）"
+  local resp
+  resp="$(curl -fsSL --connect-timeout 12 $(cproxy) -d "chat_id=$chat" \
+    --data-urlencode "text=🔔 「$CUR_LABEL」测试消息：配置正确，工作正常！" \
+    -d "parse_mode=HTML" "https://api.telegram.org/bot${token}/sendMessage" 2>&1)"
+  printf '%s' "$resp" | grep -q '"ok":true' && ok "已发送" \
+    || { err "发送失败"; printf '%s' "$resp" | grep -oE '"description":"[^"]*"' | head -1 | sed 's/^/    /'; }
+}
+
+inst_proxy() {
+  local p; p="$(cval https_proxy)"; [ -n "$p" ] && echo "  当前：$p"
+  printf "  代理地址（留空清除）: "; read -r p
+  local token chat dd label; token="$(cval TG_BOT_TOKEN)"; chat="$(cval TG_CHAT_ID)"
+  dd="$(cval DATA_DIR)"; [ -z "$dd" ] && dd="$CUR_DIR/data"; label="$(cval INSTANCE_LABEL)"
+  umask 077
+  { [ -n "$token" ] && echo "TG_BOT_TOKEN=$token"; [ -n "$chat" ] && echo "TG_CHAT_ID=$chat"
+    echo "DATA_DIR=$dd"; [ -n "$label" ] && echo "INSTANCE_LABEL=$label"
+    [ -n "$p" ] && echo "https_proxy=$p"; } > "$CUR_ENV"
+  chmod 600 "$CUR_ENV"
+  [ -n "$p" ] && ok "代理已设为 $p" || ok "已清除代理"
+  systemctl restart "$CUR_SVC" >/dev/null 2>&1 && ok "已重启生效"
+}
+
+inst_log()     { journalctl -u "$CUR_SVC" -n 30 --no-pager; }
+inst_restart() { systemctl restart "$CUR_SVC" && ok "已重启"; }
+
+inst_update() {
+  local latest cur; cur="未知"; [ -f "$CUR_DIR/VERSION" ] && cur="$(cat "$CUR_DIR/VERSION")"
+  echo "    当前: $cur"
+  latest="$(curl -fsSL --connect-timeout 12 $(cproxy) \
+    "https://api.github.com/repos/wazakid/unmi_TGtool/releases/latest" 2>/dev/null \
+    | grep -oE '"tag_name":[[:space:]]*"[^"]+"' | head -1 | cut -d'"' -f4)"
+  [ -z "$latest" ] && { err "获取最新版本失败（网络问题）"; return; }
+  echo "    最新: $latest"
+  [ "$cur" = "$latest" ] && { ok "已是最新"; return; }
+  printf "    更新到 %s？[y/N] " "$latest"; read -r a; [ "$a" = "y" ] || { warn "已取消"; return; }
+  local tmp; tmp="$(mktemp -d)"
+  curl -fsSL --connect-timeout 20 $(cproxy) \
+    "https://github.com/wazakid/unmi_TGtool/releases/download/${latest}/unmi_TGtool.tar.gz" \
+    -o "$tmp/p.tgz" 2>/dev/null || { err "下载失败"; rm -rf "$tmp"; return; }
+  cp -r "$CUR_DIR/data" "$tmp/dbak" 2>/dev/null || true
+  tar xzf "$tmp/p.tgz" -C "$tmp"
+  rm -rf "$CUR_DIR/core" "$CUR_DIR/modules"
+  cp -r "$tmp/unmi_TGtool/core" "$tmp/unmi_TGtool/modules" "$CUR_DIR/"
+  cp "$tmp/unmi_TGtool/main.py" "$tmp/unmi_TGtool/TGcalc_bot.py" "$CUR_DIR/"
+  mkdir -p "$CUR_DIR/data"; cp -r "$tmp/dbak/." "$CUR_DIR/data/" 2>/dev/null || true
+  echo "$latest" > "$CUR_DIR/VERSION"
+  [ -f "$tmp/unmi_TGtool/unmi-cli.sh" ] && install -m 755 "$tmp/unmi_TGtool/unmi-cli.sh" /usr/local/bin/unmi
+  rm -rf "$tmp"
+  systemctl restart "$CUR_SVC" && ok "已更新到 $latest 并重启"
+}
+
+inst_uninstall() {
+  echo -e "  ${C_RED}卸载机器人「$CUR_LABEL」（实例 $CUR_NAME）${C_RESET}"
+  echo "    将删除：$CUR_ENV、服务 $CUR_SVC$( [ "$CUR_NAME" != "main" ] && echo "、$CUR_DIR" )"
+  printf "    确认？输入 yes: "; read -r a; [ "$a" = "yes" ] || { warn "已取消"; return; }
+  systemctl stop "$CUR_SVC" 2>/dev/null; systemctl disable "$CUR_SVC" 2>/dev/null
+  rm -f "/etc/systemd/system/$CUR_SVC.service" "$CUR_ENV"
+  [ "$CUR_NAME" != "main" ] && rm -rf "$CUR_DIR" || warn "主实例目录保留（其他实例可能共享其代码）"
+  systemctl daemon-reload
+  ok "已卸载「$CUR_LABEL」"
+  return 9
+}
+
+inst_menu() {
+  while :; do
+    echo
+    echo -e "${C_BOLD}  🤖 $CUR_LABEL${C_RESET} ${C_DIM}（$CUR_SVC · $(systemctl is-active "$CUR_SVC" 2>/dev/null)）${C_RESET}"
+    echo -e "  ${C_CYAN}1${C_RESET}) 查看状态      ${C_CYAN}2${C_RESET}) 配置机器人    ${C_CYAN}3${C_RESET}) 发送测试"
+    echo -e "  ${C_CYAN}4${C_RESET}) 配置代理      ${C_CYAN}5${C_RESET}) 查看日志      ${C_CYAN}6${C_RESET}) 重启服务"
+    echo -e "  ${C_CYAN}7${C_RESET}) 一键更新      ${C_CYAN}8${C_RESET}) 卸载此机器人  ${C_CYAN}0${C_RESET}) 返回"
+    printf "  选择: "; read -r n
+    case "$n" in
+      1) inst_status ;; 2) inst_config ;; 3) inst_test ;; 4) inst_proxy ;;
+      5) inst_log ;;   6) inst_restart ;; 7) inst_update ;;
+      8) inst_uninstall; [ $? = 9 ] && return ;;
+      0|q) return ;;
+      *) warn "无效" ;;
+    esac
+  done
+}
+
+#===============================================================================
+# 主菜单
+#===============================================================================
+
 banner() {
   echo -e "${C_CYAN}"
   cat <<'EOF'
@@ -51,206 +361,55 @@ EOF
   echo -e "${C_RESET}"
 }
 
-# ---- 1. 查看状态 ----
-do_status() {
-  echo -e "${C_BOLD}  服务状态${C_RESET}"
-  systemctl is-active --quiet "$SERVICE" \
-    && echo -e "    运行:  ${C_GREEN}active（运行中）${C_RESET}" \
-    || echo -e "    运行:  ${C_RED}inactive（未运行）${C_RESET}"
-  systemctl is-enabled --quiet "$SERVICE" 2>/dev/null \
-    && echo -e "    自启:  enabled" || echo -e "    自启:  disabled"
-  echo    "    目录:  $APP_DIR"
-  echo    "    配置:  $ENV_FILE"
-  local t c p; t="$(TOKEN)"; c="$(CHAT)"; p="$(PROXY)"
-  [ -n "$t" ] && echo "    token: ${t:0:10}…（已配置）" || echo "    token: 未配置"
-  [ -n "$c" ] && echo "    chat:  $c" || echo "    chat:  未配置"
-  [ -n "$p" ] && echo "    代理:  $p" || echo "    代理:  未配置（直连）"
-}
-
-# ---- 2. 配置机器人 ----
-do_config_bot() {
-  echo -e "${C_BOLD}  配置机器人${C_RESET}"
-  local token chat
-  printf "  Bot Token（形如 123456:ABC...）: "; read -r token
-  printf '%s' "$token" | grep -qE '^[0-9]+:[A-Za-z0-9_-]{20,}$' \
-    || { err "token 格式不对，未保存"; return; }
-  printf "  Chat ID（纯数字）: "; read -r chat
-  printf '%s' "$chat" | grep -qE '^-?[0-9]+$' \
-    || { err "chat id 必须是数字，未保存"; return; }
-
-  # 保留已有的 DATA_DIR / 代理，只更新 token 和 chat_id
-  local dd proxy; dd="$(get_val DATA_DIR)"; proxy="$(PROXY)"
-  [ -z "$dd" ] && dd="$APP_DIR/data"
-  umask 077
-  {
-    echo "TG_BOT_TOKEN=$token"
-    echo "TG_CHAT_ID=$chat"
-    echo "DATA_DIR=$dd"
-    [ -n "$proxy" ] && echo "https_proxy=$proxy"
-  } > "$ENV_FILE"
-  chmod 600 "$ENV_FILE"
-  ok "已保存"
-  systemctl is-active --quiet "$SERVICE" && { systemctl restart "$SERVICE"; ok "服务已重启生效"; }
-  warn "建议用「发送测试信息」验证配置是否正确"
-}
-
-# ---- 3. 发送测试信息 ----
-do_send_test() {
-  local token chat; token="$(TOKEN)"; chat="$(CHAT)"
-  [ -z "$token" ] || [ -z "$chat" ] && { err "还没配置 token / chat_id，先选 2 配置"; return; }
-  echo "  发送中…（走代理：$(PROXY || echo 无)）"
-  local resp
-  resp=$(curl -fsSL --connect-timeout 12 $(proxy_args) \
-    -d "chat_id=${chat}" \
-    --data-urlencode "text=🔔 unmi_TGtool 测试消息：配置正确，bot 工作正常！发 66*98 试试。" \
-    -d "parse_mode=HTML" \
-    "https://api.telegram.org/bot${token}/sendMessage" 2>&1) || resp=""
-  if printf '%s' "$resp" | grep -q '"ok":true'; then
-    ok "已发送，去 Telegram 看"
-  else
-    err "发送失败"
-    printf '%s' "$resp" | grep -oE '"description":"[^"]*"' | head -1 | sed 's/^/    /'
-    warn "常见原因：token/chat_id 不对、没先给 bot 发过消息、或网络不通（国内要配代理，选 4）"
-  fi
-}
-
-# ---- 4. 配置代理（国内服务器连不上 api.telegram.org 时用）----
-do_config_proxy() {
-  echo -e "${C_BOLD}  配置代理${C_RESET}（国内 VPS 访问 Telegram 需要；留空表示直连）"
-  local p; p="$(PROXY)"
-  [ -n "$p" ] && echo "  当前：$p"
-  printf "  代理地址（如 http://127.0.0.1:7890，留空清除）: "; read -r p
-  local token chat dd; token="$(TOKEN)"; chat="$(CHAT)"; dd="$(get_val DATA_DIR)"
-  [ -z "$dd" ] && dd="$APP_DIR/data"
-  umask 077
-  {
-    [ -n "$token" ] && echo "TG_BOT_TOKEN=$token"
-    [ -n "$chat" ] && echo "TG_CHAT_ID=$chat"
-    echo "DATA_DIR=$dd"
-    [ -n "$p" ] && echo "https_proxy=$p"
-  } > "$ENV_FILE"
-  chmod 600 "$ENV_FILE"
-  [ -n "$p" ] && ok "代理已设为 $p" || ok "已清除代理（直连）"
-  systemctl is-active --quiet "$SERVICE" && { systemctl restart "$SERVICE"; ok "服务已重启生效"; }
-}
-
-# ---- 5. 查看日志 ----
-do_log() { journalctl -u "$SERVICE" -n 30 --no-pager; }
-
-# ---- 6. 重启 ----
-do_restart() { systemctl restart "$SERVICE" && ok "已重启"; }
-
-# ---- 7. 一键更新（拉 GitHub 最新版，保留配置与数据）----
-do_update() {
-  echo -e "${C_BOLD}  一键更新${C_RESET}"
-  local latest cur
-  # 当前版本（安装/上次更新时写入的 VERSION 文件）
-  cur="未知"
-  [ -f "$APP_DIR/VERSION" ] && cur="$(cat "$APP_DIR/VERSION" 2>/dev/null)"
-  echo "    当前版本: $cur"
-
-  # 查最新版本（走代理，如果有）
-  latest="$(curl -fsSL --connect-timeout 12 $(proxy_args) \
-    "https://api.github.com/repos/wazakid/unmi_TGtool/releases/latest" 2>/dev/null \
-    | grep -oE '"tag_name":[[:space:]]*"[^"]+"' | head -1 | cut -d'"' -f4)"
-  [ -z "$latest" ] && { err "获取最新版本失败（网络问题，国内先配代理）"; return; }
-  echo "    最新版本: $latest"
-  if [ "$cur" = "$latest" ]; then
-    ok "已经是最新版本，无需更新"
-    return
-  fi
-  printf "    确认更新到 %s？[y/N] " "$latest"; read -r ans
-  [ "$ans" = "y" ] || { warn "已取消"; return; }
-
-  # 下载
-  local tmp; tmp="$(mktemp -d)"
-  echo "    下载中…"
-  curl -fsSL --connect-timeout 20 $(proxy_args) \
-    "https://github.com/wazakid/unmi_TGtool/releases/download/${latest}/unmi_TGtool.tar.gz" \
-    -o "$tmp/pkg.tar.gz" 2>/dev/null \
-    || { err "下载失败（网络问题）"; rm -rf "$tmp"; return; }
-  ok "已下载"
-
-  # 备份用户数据（设置等）
-  cp -r "$APP_DIR/data" "$tmp/data_bak" 2>/dev/null || true
-
-  # 解压并覆盖程序文件（保留 data 与 /etc 下的配置）
-  tar xzf "$tmp/pkg.tar.gz" -C "$tmp"
-  rm -rf "$APP_DIR/core" "$APP_DIR/modules"
-  cp -r "$tmp/unmi_TGtool/core" "$tmp/unmi_TGtool/modules" "$APP_DIR/"
-  cp "$tmp/unmi_TGtool/main.py" "$tmp/unmi_TGtool/TGcalc_bot.py" "$APP_DIR/"
-  [ -f "$tmp/unmi_TGtool/selftest_public.py" ] && cp "$tmp/unmi_TGtool/selftest_public.py" "$APP_DIR/"
-  [ -f "$tmp/unmi_TGtool/selftest_calc.py" ] && cp "$tmp/unmi_TGtool/selftest_calc.py" "$APP_DIR/"
-  # 恢复数据
-  mkdir -p "$APP_DIR/data"
-  cp -r "$tmp/data_bak/." "$APP_DIR/data/" 2>/dev/null || true
-  # 记录版本
-  echo "$latest" > "$APP_DIR/VERSION"
-  # 同步更新 unmi 命令本身
-  [ -f "$tmp/unmi_TGtool/unmi-cli.sh" ] && install -m 755 "$tmp/unmi_TGtool/unmi-cli.sh" /usr/local/bin/unmi
-  rm -rf "$tmp"
-  ok "已更新到 $latest（配置与数据已保留）"
-
-  # 重启生效
-  systemctl restart "$SERVICE" && ok "服务已重启，新版本生效"
-}
-
-# ---- 8. 一键卸载 ----
-do_uninstall() {
-  echo -e "${C_RED}${C_BOLD}  一键卸载 unmi_TGtool${C_RESET}"
-  echo "    将删除：$APP_DIR、$ENV_FILE、systemd 服务、unmi 命令"
-  printf "    确认卸载？输入 yes: "; read -r ans
-  [ "$ans" = "yes" ] || { warn "已取消"; return; }
-  systemctl stop "$SERVICE" 2>/dev/null || true
-  systemctl disable "$SERVICE" 2>/dev/null || true
-  rm -f "/etc/systemd/system/$SERVICE.service" "$ENV_FILE"
-  rm -rf "$APP_DIR"
-  systemctl daemon-reload
-  ok "已卸载"
-  echo "    unmi 命令将于退出后移除（/usr/local/bin/unmi）"
-  (sleep 1; rm -f /usr/local/bin/unmi) &
-  exit 0
-}
-
-# ---- 主菜单 ----
-menu() {
+main_menu() {
   clear 2>/dev/null || true
   banner
-  local st
-  systemctl is-active --quiet "$SERVICE" && st="${C_GREEN}运行中${C_RESET}" || st="${C_RED}未运行${C_RESET}"
-  echo -e "  ${C_BOLD}unmi_TGtool 控制面板${C_RESET}   服务：$st"
+  echo -e "  ${C_BOLD}unmi_TGtool 控制台${C_RESET}  ${C_DIM}集中管理本机的 Telegram 机器人${C_RESET}"
   echo
-  echo -e "  ${C_CYAN}1${C_RESET}) 查看服务状态"
-  echo -e "  ${C_CYAN}2${C_RESET}) 配置机器人（token / chat_id）"
-  echo -e "  ${C_CYAN}3${C_RESET}) 发送测试信息"
-  echo -e "  ${C_CYAN}4${C_RESET}) 配置代理（国内连不上 Telegram 时用）"
-  echo -e "  ${C_CYAN}5${C_RESET}) 查看日志"
-  echo -e "  ${C_CYAN}6${C_RESET}) 重启服务"
-  echo -e "  ${C_CYAN}7${C_RESET}) 一键更新"
-  echo -e "  ${C_CYAN}8${C_RESET}) 一键卸载"
-  echo -e "  ${C_CYAN}0${C_RESET}) 退出"
+
+  local i=0 name dir env svc label state
+  declare -a NAMES=()
+  local count; count="$(list_instances | wc -l | tr -d ' ')"
+  if [ "$count" = "0" ]; then
+    echo -e "  ${C_DIM}还没有任何机器人。${C_RESET}"
+  else
+    echo -e "  ${C_BOLD}已装机器人：${C_RESET}"
+    while IFS='|' read -r name dir env svc; do
+      i=$((i+1)); NAMES+=("$name")
+      label="$(display_name "$name" "$dir" "$env")"
+      state="$(svc_state "$svc")"
+      printf "   ${C_CYAN}%d${C_RESET}) %-28s %s\n" "$i" "$label" "$state"
+    done <<EOF
+$(list_instances)
+EOF
+  fi
   echo
+  echo -e "  ${C_CYAN}a${C_RESET}) 添加机器人    ${C_CYAN}0${C_RESET}) 退出"
+  echo
+
+  local n
+  printf "  选择（数字进入管理）: "; read -r n
+  case "$n" in
+    a|A) add_bot ;;
+    0|q) echo "  再见"; exit 0 ;;
+    ''|*[!0-9]*) warn "无效选项" ;;
+    *)
+      if [ "$n" -ge 1 ] && [ "$n" -le "$i" ]; then
+        set_current "${NAMES[$((n-1))]}"
+        inst_menu
+      else
+        warn "没有这个编号"
+      fi ;;
+  esac
 }
 
 main() {
   [ "$(id -u)" -ne 0 ] && { err "需要 root（sudo unmi）"; exit 1; }
+  case "${1:-}" in
+    add|a) add_bot; exit 0 ;;        # unmi add —— 直接进添加流程（安装脚本首次调用）
+  esac
   while :; do
-    menu
-    printf "  请选择 [0-8]: "; read -r n
-    case "$n" in
-      1) do_status ;;
-      2) do_config_bot ;;
-      3) do_send_test ;;
-      4) do_config_proxy ;;
-      5) do_log ;;
-      6) do_restart ;;
-      7) do_update ;;
-      8) do_uninstall ;;
-      0|q) echo "  再见"; exit 0 ;;
-      *) warn "无效选项" ;;
-    esac
-    echo
-    printf "  按回车返回菜单…"; read -r _
+    main_menu
   done
 }
 

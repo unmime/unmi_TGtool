@@ -217,10 +217,14 @@ def main():
         return 0
 
     _ctx, _mods, disp = build(cfg)
+    # 注意：与 CrowdSec relay 共用同一 bot token，setMyCommands 是全量覆盖，
+    # 这里必须注册完整命令列表，否则会把 /crowdsec、/qinglong 顶掉。
     _ctx.setup_commands(
-        [{"command": "calc", "description": "🧮 计算器设置"},
+        [{"command": "crowdsec", "description": "🛡 CrowdSec 安全守护"},
+         {"command": "qinglong", "description": "🐉 青龙面板"},
+         {"command": "calc", "description": "🧮 计算器设置"},
          {"command": "help", "description": "❓ 使用说明"}],
-        "unmi_TGtool 工具集：直接发算式就能算，/calc 设置，/help 说明。")
+        "服务器安全守护（CrowdSec 集群）、青龙面板与自动化通知。/crowdsec 主菜单，直接发算式就能算。")
     threading.Thread(target=poll_loop, args=(disp,), daemon=True).start()
     while True:
         time.sleep(3600)
