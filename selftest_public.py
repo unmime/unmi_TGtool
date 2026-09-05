@@ -73,7 +73,7 @@ def main_test():
     check("66*98 有结果", any("6468" in t for t in run("66*98")), True)
     check("/calc 打开面板", any(u"设置" in t for t in run("/calc")), True)
 
-    print("[3] /help 框架兜底（无 crowdsec 时 main 兜底列出模块）")
+    print("[3] /help 框架兜底（无专用 help 模块时 main 兜底列出模块）")
     out = run("/help")
     check("/help 有响应", any(u"工具集" in t for t in out), True)
     check("/help 列出 calc 模块", any("calc" in t for t in out), True)

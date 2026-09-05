@@ -7,20 +7,33 @@
 
 拷到任意一台有 Python 3.6+ 的 Linux 机器上，**一条命令，开箱即用**。
 
-## 开箱即用（3 步）
+## ⚡ 一键安装（推荐）
+
+用 `root` 执行下面**一条命令**，自动完成下载、安装、配置，装完直接能用：
 
 ```bash
-# 1) 去 @BotFather 建 bot 拿 token；给 bot 发条消息拿你的 chat id
-# 2) 解压安装：
+bash <(curl -sL https://raw.githubusercontent.com/wazakid/unmi_TGtool/main/unmi.sh)
+```
+
+过程中会提示你输入 **Bot Token** 和 **Chat ID**（去 @BotFather 建 bot 拿 token，
+先给 bot 发条消息再拿 chat id），输完自动配置、启动，并**发一条测试消息**到你的 Telegram。
+
+装完发 `66*98` 立刻得到 `66*98=6468｜6468｜`，外加中文读法和**符合央行规范的会计大写金额**
+（`陆仟肆佰陆拾捌元整`）。结果分两段，点哪段复制哪段。
+
+## 手动安装（备选）
+
+```bash
+# 1) 下载（二选一）
+wget https://github.com/wazakid/unmi_TGtool/releases/latest/download/unmi_TGtool.tar.gz
+# 或： curl -LO https://github.com/wazakid/unmi_TGtool/releases/latest/download/unmi_TGtool.tar.gz
+
+# 2) 解压安装（tar 包带顶层目录 unmi_TGtool/）
 tar xzf unmi_TGtool.tar.gz && cd unmi_TGtool
 sudo ./install.sh "<BOT_TOKEN>" "<CHAT_ID>"
 
-# 3) 去 Telegram 给 bot 发：
-66*98
+# 3) 去 Telegram 给 bot 发 66*98
 ```
-
-立刻得到 `66*98=6468｜6468｜`，外加中文读法和**符合央行规范的会计大写金额**
-（`陆仟肆佰陆拾捌元整`）。结果分两段，点哪段复制哪段。
 
 装完自动注册并启动 systemd 服务 `unmi_TGtool`，开机自启、崩了自动拉起。
 
