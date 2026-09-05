@@ -16,7 +16,7 @@ import sys
 import tempfile
 from fractions import Fraction as F
 
-import calc
+import TGcalc_bot as calc
 
 VERBOSE = "-v" in sys.argv
 PASS, FAIL = [], []
