@@ -45,7 +45,9 @@ bash <(curl -sL https://raw.githubusercontent.com/unmime/unmi_TGtool/main/unmi.s
 | 添加机器人 | 自动识别 bot 用户名，同名/同 token 会提示；可起好认的备注名 |
 | 发送测试 | 选一个或全部，发一条测试消息验证配置 |
 | 开关机器人 | 运行中→停止，已停止→启动 |
-| 重启服务 | 选一个或全部重启 |
+| 重启面板 | 重启全部机器人服务并重载控制台（确认页，可返回） |
+| 面板命令名 | 把打开面板的命令从 `unmi` 改成你喜欢的名字（如 `tg`），一键更新也会认 |
+| 单机器人重启 | 进某个机器人的管理页选「重启此机器人」 |
 | 配置代理 | 全局代理，一次配置所有机器人共用，自动同步并重启（国内服务器必备） |
 | 一键更新 | 拉最新版，更新框架 + 所有机器人 + `unmi` 命令本身，保留各自配置 |
 | 卸载面板 | 删除所有机器人 + 控制台本身 |
@@ -77,7 +79,8 @@ sudo ./install.sh "<BOT_TOKEN>" "<CHAT_ID>"
 | 精确运算 | 全程 `Fraction`，`0.1+0.2` 就是 `0.3`，`2^64` 精确 |
 | 设置面板 `/calc` | 小数位 1~6 / 显示格式 / 结果转换 / 连续计算 |
 | 连续计算（默认关） | `3+3`=6，发 `+3` → `6+3=9`；`/00` 退出；3 分钟自动超时 |
-| 函数与常量 | `sqrt` `abs` `round` `ln` `lg` `log` `sin` `cos` `tan` `factorial` `gcd` `lcm` `max` `min`、`pi` `e` `tau` `phi` |
+| 函数与常量 | `sqrt` `cbrt` `abs` `floor` `ceil` `round` `trunc` `sign` `ln` `log` `log2` `log10` `exp` `sin` `cos` `tan` `asin` `acos` `atan` `sinh` `cosh` `tanh` `factorial` `pow` `nthroot` `hypot` `gcd` `lcm` `comb`/`nCr` `perm`/`nPr` `gamma` `max` `min` `avg` `sum`、`pi` `e` `tau` `phi` |
+| 括号 | `()` `[]` `{}` 混着写都认，`{[(2+3)]*4}` 照常计算 |
 | 科学计数法 | `1e5` `2.5e-3`；写了一半的 `1e` 会明确报错，不会算成「1×自然常数」 |
 | 安全 | AST 白名单求值，**不用 `eval`**；`__import__`/`open`/属性访问全部拒绝 |
 

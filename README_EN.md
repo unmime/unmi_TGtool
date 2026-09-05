@@ -47,7 +47,9 @@ test message automatically. Press a number to open that bot's page
 | Add bot | Auto-detects the bot username, warns on duplicate names/tokens, lets you set a label |
 | Send test | Pick one or all, sends a test message to verify the config |
 | Toggle bot | Running → stop, stopped → start |
-| Restart | Restart one or all |
+| Restart panel | Restart every bot service and reload the console (confirm page, cancellable) |
+| Panel command | Rename the launcher command from `unmi` to anything you like (e.g. `tg`); one-click update honours it |
+| Single-bot restart | Open that bot's page and pick «Restart this bot» |
 | Set proxy | Global proxy shared by every bot, synced and restarted automatically |
 | One-click update | Pulls the latest release, updates framework + all bots + the `unmi` command, keeps configs |
 | Uninstall | Removes every bot plus the dashboard itself |
@@ -79,7 +81,8 @@ A systemd service `unmi_TGtool` is registered and started automatically — auto
 | Exact arithmetic | `Fraction`-based — `0.1+0.2` is exactly `0.3`, `2^64` exact |
 | Settings panel `/calc` | decimals 1–6 / display format / conversion / chained calc |
 | Chained calc (off by default) | `3+3`=6, then `+3` → `6+3=9`; `/00` to exit; auto-exit after 3 min |
-| Functions & constants | `sqrt` `abs` `round` `ln` `lg` `log` `sin` `cos` `tan` `factorial` `gcd` `lcm` `max` `min`, `pi` `e` `tau` `phi` |
+| Functions & constants | `sqrt` `cbrt` `abs` `floor` `ceil` `round` `trunc` `sign` `ln` `log` `log2` `log10` `exp` `sin` `cos` `tan` `asin` `acos` `atan` `sinh` `cosh` `tanh` `factorial` `pow` `nthroot` `hypot` `gcd` `lcm` `comb`/`nCr` `perm`/`nPr` `gamma` `max` `min` `avg` `sum`, `pi` `e` `tau` `phi` |
+| Brackets | `()` `[]` `{}` are interchangeable — `{[(2+3)]*4}` works as written |
 | Scientific notation | `1e5`, `2.5e-3`; a half-written `1e` errors out instead of silently computing `1×e` |
 | Safe | AST allowlist evaluator, **no `eval`**; `__import__`/`open`/attribute access all rejected |
 

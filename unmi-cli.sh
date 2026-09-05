@@ -21,10 +21,9 @@ MAIN_ENV="/etc/unmi_TGtool.env"
 if [ -t 1 ]; then
   C_RESET=$'\033[0m'; C_BOLD=$'\033[1m'; C_DIM=$'\033[2m'
   C_CYAN=$'\033[36m'; C_GREEN=$'\033[32m'; C_YELLOW=$'\033[33m'
-  C_RED=$'\033[31m'; C_PURPLE=$'\033[35m'; C_BLUE=$'\033[34m'
-  C_PINK=$'\033[38;5;217m'   # 淡粉（备注用）
+  C_RED=$'\033[31m'; C_PINK=$'\033[38;5;217m'   # 淡粉（备注用）
 else
-  C_RESET=""; C_BOLD=""; C_DIM=""; C_CYAN=""; C_GREEN=""; C_YELLOW=""; C_RED=""; C_PURPLE=""; C_BLUE=""; C_PINK=""
+  C_RESET=""; C_BOLD=""; C_DIM=""; C_CYAN=""; C_GREEN=""; C_YELLOW=""; C_RED=""; C_PINK=""
 fi
 ok()   { echo -e "${C_GREEN}  [✓]${C_RESET} $*"; }
 warn() { echo -e "${C_YELLOW}  [!]${C_RESET} $*"; }
@@ -36,6 +35,7 @@ err()  { echo -e "${C_RED}  [✗]${C_RESET} $*"; }
 ask() {
   local __v="$1"; shift
   printf '%s' "$*"
+  # shellcheck disable=SC2229  # "$__v" 是故意的：按调用方传入的变量名动态赋值
   read -r "$__v" || return 1
 }
 
@@ -76,6 +76,26 @@ _disp_width() {
   python3 -c "import sys,unicodedata;s=sys.argv[1];print(sum(2 if unicodedata.east_asian_width(c) in 'WF' else 1 for c in s))" "$1" 2>/dev/null || echo -n "$1" | wc -m | tr -d ' '
 }
 
+# 代理地址净化：去掉首尾空白和误粘进来的标点。
+# 提示语写成「（如 http://127.0.0.1:7890）」时，用户经常连括号一起复制，
+# 存进去就是 http://127.0.0.1:7890）—— curl 用它必然连不通，
+# 而报错只说「连不通」，看不出是多了一个全角括号，非常难查。
+normalize_proxy() {
+  printf '%s' "$1" | sed 's/^[^A-Za-z0-9]*//; s/[^A-Za-z0-9/:._~%@+-]*$//'
+}
+
+# 格式校验：scheme://地址:端口（地址里可带 user:pass@，支持 IPv6 的 [::1] 写法）。
+#
+# 主机位必须是「安全字符集」，不能用 [^/[:space:]]+ 那种宽匹配：
+# 代理地址在 $(proxy_args) 里是故意不加引号展开的（要拆成 -x <url> 两个参数），
+# 一旦地址里混进 * ? [ ] 空格，就会被 shell 当成 glob 展开 / 词分割，
+# 地址会静默变成别的字符串（cwd 里恰好有匹配文件时）甚至解析失败。
+# 所以这里直接把 glob 元字符和空白全部排除在字符集之外。
+proxy_looks_ok() {
+  printf '%s' "$1" | grep -qE \
+    '^[a-zA-Z][a-zA-Z0-9+.-]*://([A-Za-z0-9._~%+:-]+@)?(\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9._~%-]+):[0-9]{1,5}/?$'
+}
+
 # 版本号比较：只看数字段（忽略前缀 v），逐段比大小。
 # 用来防止「一键更新」把新版本降回旧版本 —— 比如远端标签被回退、或本地版本比远端新。
 ver_ge() {  # ver_ge a b —— a >= b 返回 0，否则返回 1
@@ -107,6 +127,8 @@ menu_row() {
     k="$1"; label="${2-}"; shift; [ "$#" -gt 0 ] && shift
     cur="${C_CYAN}${k}${C_RESET} ${label}"
     pad=$(( w - $(_disp_width "$(_plain "$cur")") ))
+    # 不能给下限：标签比列宽还长时（如「删除此机器人」）会被撑宽，跨行的列就对不齐了。
+    # 超长标签的选项请单独放一行（见重启面板页）。
     [ "$pad" -lt 1 ] && pad=1
     out="${out}${cur}$(printf '%*s' "$pad" '')"
   done
@@ -160,14 +182,33 @@ list_instances() {
 
 get_val() { grep -E "^$2=" "$1" 2>/dev/null | head -1 | cut -d= -f2-; }
 
-# 该 env 生效的代理（拼成 curl 参数）
-proxy_args() { local p; p="$(get_val "$1" https_proxy)"; [ -n "$p" ] && printf -- '-x %s' "$p" || printf ''; }
+# 代理参数一律装进数组，调用方用 "${PROXY_ARGS[@]}" 传参。
+#
+# 不能拼成字符串再不加引号展开（旧写法 $(proxy_args ...)）：
+# 那样地址里的空格会被词分割、* ? [ ] 会被当 glob 展开，
+# 地址可能静默变成别的东西。数组是唯一安全的传参方式。
+PROXY_ARGS=()
+
+# 按 env 文件里的 https_proxy 填数组（$1=env 文件路径）
+proxy_args() {
+  PROXY_ARGS=()
+  local p; p="$(get_val "$1" https_proxy)"
+  [ -n "$p" ] && PROXY_ARGS=(-x "$p")
+}
 
 # 全局代理（安装时配一次，所有机器人共用）。存 $BASE/data/proxy.conf
 PROXY_CONF="$BASE/data/proxy.conf"
 global_proxy() { cat "$PROXY_CONF" 2>/dev/null; }
-# 供 curl 用（展开成 -x 参数或空）
-global_proxy_args() { local p; p="$(global_proxy)"; [ -n "$p" ] && printf -- '-x %s' "$p" || printf ''; }
+
+# 打开面板用的命令名（默认 unmi，用户可改）。存 $BASE/data/panel-cmd.conf。
+# 「一键更新」也得装到这个名字上，否则一更新就把自定义名字打回 unmi。
+PANEL_CMD_CONF="$BASE/data/panel-cmd.conf"
+DEFAULT_PANEL_CMD="unmi"
+panel_cmd() {
+  # 先 cat 再 tr：< 的重定向错误 tr 的 2>/dev/null 拦不住，文件不存在时会漏一行报错到界面
+  local n; n="$(cat "$PANEL_CMD_CONF" 2>/dev/null | tr -d ' \t\r\n')"
+  printf '%s' "${n:-$DEFAULT_PANEL_CMD}"
+}
 
 # 运行状态：三种展示风格统一由这里出，避免各处自己 if/else 导致文案和配色不一致。
 #   svc_state <服务名> [dot|text|en]
@@ -197,7 +238,8 @@ bot_username() {  # $1=dir $2=env
   [ -f "$cache" ] && { cat "$cache" 2>/dev/null; return; }
   token="$(get_val "$2" TG_BOT_TOKEN)"
   [ -z "$token" ] && return
-  un="$(curl -fsSL --connect-timeout 10 $(proxy_args "$2") \
+  proxy_args "$2"
+  un="$(curl -fsSL --connect-timeout 10 "${PROXY_ARGS[@]}" \
         "https://api.telegram.org/bot${token}/getMe" 2>/dev/null \
         | grep -oE '"username":"[^"]+"' | head -1 | cut -d'"' -f4)"
   if [ -n "$un" ]; then
@@ -248,17 +290,19 @@ add_bot() {
   for f in /etc/unmi_TGtool*.env; do
     [ -f "$f" ] || continue
     if grep -q "^TG_BOT_TOKEN=${token}$" "$f" 2>/dev/null; then
-      warn "这个 token 已被实例（$f）占用，同 token 跑两个会互相抢消息"
+      warn "这个 token 已被实例（${f}）占用，同 token 跑两个会互相抢消息"
       ask c "  仍要添加？[y/N] " || return; [ "$c" = "y" ] || return
     fi
   done
 
   # 识别 bot 名（用安装时已配好的全局代理，这里不再询问）
-  local proxy px; proxy="$(global_proxy)"; px=""
-  [ -n "$proxy" ] && px="-x $proxy"
+  local proxy; proxy="$(global_proxy)"
+  # 同样用数组传参，别拼字符串后不带引号展开（地址里的空格/glob 字符会被吃掉）
+  PROXY_ARGS=()
+  [ -n "$proxy" ] && PROXY_ARGS=(-x "$proxy")
   echo -e "  ${C_DIM}正在识别机器人…$( [ -n "$proxy" ] && echo "（走全局代理）" )${C_RESET}"
   local me un fname
-  me="$(curl -fsSL --connect-timeout 12 $px "https://api.telegram.org/bot${token}/getMe" 2>/dev/null)"
+  me="$(curl -fsSL --connect-timeout 12 "${PROXY_ARGS[@]}" "https://api.telegram.org/bot${token}/getMe" 2>/dev/null)"
   un="$(printf '%s' "$me" | grep -oE '"username":"[^"]+"' | head -1 | cut -d'"' -f4)"
   fname="$(printf '%s' "$me" | grep -oE '"first_name":"[^"]+"' | head -1 | cut -d'"' -f4)"
   if [ -n "$un" ]; then
@@ -301,7 +345,7 @@ add_bot() {
     dir="$BASE-$slug"; env="/etc/unmi_TGtool-$slug.env"; svc="unmi_TGtool-$slug"
   fi
   if [ -f "$env" ]; then
-    warn "实例 $slug 已配置过（$env）"
+    warn "实例 $slug 已配置过（${env}）"
     ask c "  覆盖重装？[y/N] " || return; [ "$c" = "y" ] || return
   fi
 
@@ -351,8 +395,8 @@ EOF
     || { err "启动失败，看日志：journalctl -u $svc -n 20"; return; }
 
   local resp
-  resp="$(curl -fsSL --connect-timeout 12 $px \
-    -d "chat_id=$chat" --data-urlencode "text=🎉 机器人「$label」已上线！发 66*98 试试。" \
+  resp="$(curl -fsSL --connect-timeout 12 "${PROXY_ARGS[@]}" \
+    -d "chat_id=$chat" --data-urlencode "text=🎉 机器人「${label}」已上线！发 66*98 试试。" \
     -d "parse_mode=HTML" "https://api.telegram.org/bot${token}/sendMessage" 2>/dev/null)"
   printf '%s' "$resp" | grep -q '"ok":true' \
     && ok "测试消息已发到 Telegram" \
@@ -361,17 +405,17 @@ EOF
   echo
   divider
   echo -e "${C_GREEN}${C_BOLD}  ✅ 添加完成 · 配置摘要${C_RESET}"
-  echo    "    机器人:  ${un:+@$un }（$label）"
+  echo    "    机器人:  ${un:+@$un }（${label}）"
   echo    "    Chat ID: $chat"
   echo    "    代理:    ${proxy:-直连}"
-  echo    "    实例:    $slug（服务 $svc）"
+  echo    "    实例:    ${slug}（服务 ${svc}）"
   divider
   echo -e "  去 Telegram 给 ${C_BOLD}${un:+@$un}${C_RESET} 发 ${C_CYAN}66*98${C_RESET} 就能用"
 
   # 添加完成，直接进入这个机器人的管理页面（而不是退回主菜单）
   local iname="main"; [ "$dir" != "$BASE" ] && iname="$slug"
   echo
-  echo -e "  ${C_DIM}进入「$label」的管理页面…${C_RESET}"
+  echo -e "  ${C_DIM}进入「${label}」的管理页面…${C_RESET}"
   sleep 1
   set_current "$iname"
   inst_menu
@@ -392,10 +436,14 @@ set_current() {  # $1=name
 }
 
 cur_val()   { get_val "$CUR_ENV" "$1"; }
-cur_proxy_args() { local p; p="$(cur_val https_proxy)"; [ -n "$p" ] && printf -- '-x %s' "$p" || printf ''; }
+cur_proxy_args() {
+  PROXY_ARGS=()
+  local p; p="$(cur_val https_proxy)"
+  [ -n "$p" ] && PROXY_ARGS=(-x "$p")
+}
 
 inst_status() {
-  echo -e "  名称:   ${C_BOLD}$CUR_LABEL${C_RESET}（实例 $CUR_NAME）"
+  echo -e "  名称:   ${C_BOLD}$CUR_LABEL${C_RESET}（实例 ${CUR_NAME}）"
   echo -e "  运行:   $(svc_state "$CUR_SVC")"
   echo    "  目录:   $CUR_DIR"
   echo    "  配置:   $CUR_ENV"
@@ -410,7 +458,7 @@ inst_status() {
 # 统一写 env：以原文件为底，只覆盖本次传入的键，其余字段（含以后新增的未知键）原样保留。
 # 先写临时文件再原子替换，中途被打断也不会留下写了一半的配置。
 # 刻意不用关联数组：保持 bash 3.2 兼容（macOS 自带 bash 仍是 3.2，方便本地自测）。
-save_env() {  # 用法: save_env KEY=VAL [KEY=VAL ...]（作用于当前实例 $CUR_ENV）
+save_env() {  # 用法: save_env KEY=VAL [KEY=VAL ...]（作用于当前实例 ${CUR_ENV}）
   local tmpf kv k v
   tmpf="$(mktemp "${CUR_ENV}.tmp.XXXXXX")" || { err "无法创建临时文件"; return 1; }
   cp -f "$CUR_ENV" "$tmpf" 2>/dev/null || : > "$tmpf"
@@ -460,8 +508,9 @@ inst_test() {
   local _px; _px="$(cur_val https_proxy)"
   echo "  发送中…（代理：${_px:-无}）"
   local resp
-  resp="$(curl -fsSL --connect-timeout 12 $(cur_proxy_args) -d "chat_id=$chat" \
-    --data-urlencode "text=🔔 「$CUR_LABEL」测试消息：配置正确，工作正常！" \
+  cur_proxy_args
+  resp="$(curl -fsSL --connect-timeout 12 "${PROXY_ARGS[@]}" -d "chat_id=$chat" \
+    --data-urlencode "text=🔔 「${CUR_LABEL}」测试消息：配置正确，工作正常！" \
     -d "parse_mode=HTML" "https://api.telegram.org/bot${token}/sendMessage" 2>&1)"
   printf '%s' "$resp" | grep -q '"ok":true' && ok "已发送" \
     || { err "发送失败"; printf '%s' "$resp" | grep -oE '"description":"[^"]*"' | head -1 | sed 's/^/    /'; }
@@ -472,6 +521,12 @@ inst_proxy() {
   echo -e "  ${C_DIM}（输入 0 返回菜单）${C_RESET}"
   ask p "  代理地址（留空清除）: " || return
   [ "$p" = "0" ] && return
+  local praw="$p"
+  p="$(normalize_proxy "$p")"
+  if [ -n "$praw" ] && ! proxy_looks_ok "$p"; then
+    err "地址格式不对，已取消（正确写法：http://127.0.0.1:7890）"
+    return
+  fi
   save_env https_proxy="$p"
   [ -n "$p" ] && ok "代理已设为 $p" || ok "已清除代理"
   systemctl restart "$CUR_SVC" >/dev/null 2>&1 && ok "已重启生效"
@@ -486,17 +541,32 @@ inst_note() {
   [ "$cur" = "0" ] && return
   cur="$(sanitize "$cur")"
   save_env INSTANCE_NOTE="$cur"
-  CUR_NOTE="$cur"
   [ -n "$cur" ] && ok "备注已保存：$cur" || ok "备注已清除"
 }
 
 inst_log()     { journalctl -u "$CUR_SVC" -n 30 --no-pager; }
-inst_restart() { systemctl restart "$CUR_SVC" && ok "已重启"; }
+
+# 重启当前这个机器人（单个机器人重启从主页挪到了这里）
+inst_restart() {
+  echo
+  draw_box "🤖 $CUR_LABEL" "${C_DIM}确认重启这个机器人？${C_RESET}"
+  echo
+  menu_row "「1」" "确认重启" "「0」" "返回"
+  divider
+  local a
+  ask a "  选择: " || return
+  case "$a" in
+    1) systemctl restart "$CUR_SVC" && ok "已重启：$CUR_SVC" || err "重启失败：$CUR_SVC" ;;
+    0|q) warn "已取消" ;;
+    *) warn "无效选项" ;;
+  esac
+}
 
 inst_update() {
   local latest cur; cur="未知"; [ -f "$CUR_DIR/VERSION" ] && cur="$(cat "$CUR_DIR/VERSION")"
   echo "    当前: $cur"
-  latest="$(curl -fsSL --connect-timeout 12 $(cur_proxy_args) \
+  cur_proxy_args
+  latest="$(curl -fsSL --connect-timeout 12 "${PROXY_ARGS[@]}" \
     "https://api.github.com/repos/unmime/unmi_TGtool/releases/latest" 2>/dev/null \
     | grep -oE '"tag_name":[[:space:]]*"[^"]+"' | head -1 | cut -d'"' -f4)"
   [ -z "$latest" ] && { err "获取最新版本失败（网络问题）"; return; }
@@ -513,7 +583,8 @@ inst_update() {
   ask a "    ${C_BOLD}是否更新到 ${latest}？${C_RESET} [y] 更新  [0/其它] 返回: " || return
   [ "$a" = "y" ] || { warn "已取消"; return; }
   local tmp; tmp="$(make_tmp)" || { err "无法创建临时目录"; return; }
-  curl -fsSL --connect-timeout 20 $(cur_proxy_args) \
+  cur_proxy_args
+  curl -fsSL --connect-timeout 20 "${PROXY_ARGS[@]}" \
     "https://github.com/unmime/unmi_TGtool/releases/download/${latest}/unmi_TGtool.tar.gz" \
     -o "$tmp/p.tgz" 2>/dev/null || { err "下载失败"; rm -rf "$tmp"; return; }
   cp -r "$CUR_DIR/data" "$tmp/dbak" 2>/dev/null || true
@@ -525,24 +596,35 @@ inst_update() {
   cp "$tmp/unmi_TGtool/main.py" "$CUR_DIR/"
   mkdir -p "$CUR_DIR/data"; cp -r "$tmp/dbak/." "$CUR_DIR/data/" 2>/dev/null || true
   echo "$latest" > "$CUR_DIR/VERSION"
-  [ -f "$tmp/unmi_TGtool/unmi-cli.sh" ] && install -m 755 "$tmp/unmi_TGtool/unmi-cli.sh" /usr/local/bin/unmi
+  # 装到用户自定义的命令名下（不能写死 unmi，否则一更新就把自定义名字冲掉）
+  [ -f "$tmp/unmi_TGtool/unmi-cli.sh" ] && install -m 755 "$tmp/unmi_TGtool/unmi-cli.sh" "/usr/local/bin/$(panel_cmd)"
   rm -rf "$tmp"
   systemctl restart "$CUR_SVC" && ok "已更新到 $latest 并重启"
 }
 
 inst_uninstall() {
   # 只删除当前这个机器人（它的配置/服务/目录），不动控制台本身和其它机器人
-  echo -e "  ${C_RED}删除机器人「$CUR_LABEL」（实例 $CUR_NAME）${C_RESET}"
-  echo "    将删除：$CUR_ENV、服务 $CUR_SVC$( [ "$CUR_NAME" != "main" ] && echo "、$CUR_DIR" )"
-  echo -e "    ${C_DIM}控制台和其它机器人不受影响${C_RESET}"
   echo
-  ask a "    ${C_BOLD}是否删除？${C_RESET} [y] 删除  [0/其它] 取消: " || return
-  [ "$a" = "y" ] || { warn "已取消"; return; }
+  draw_box left "${C_RED}${C_BOLD}删除机器人${C_RESET}" \
+    "${C_RED}✗${C_RESET} $CUR_LABEL" \
+    "${C_DIM}将删除 $CUR_ENV${C_RESET}" \
+    "${C_DIM}服务 $CUR_SVC$( [ "$CUR_NAME" != "main" ] && echo "、目录 $CUR_DIR" )${C_RESET}" \
+    "${C_GREEN}控制台和其它机器人不受影响${C_RESET}"
+  echo
+  menu_row "「1」" "确认删除" "「0」" "返回"
+  divider
+  local a
+  ask a "  选择: " || return
+  case "$a" in
+    1) ;;
+    0|q) warn "已取消"; return ;;
+    *) warn "无效选项"; return ;;
+  esac
   systemctl stop "$CUR_SVC" 2>/dev/null; systemctl disable "$CUR_SVC" 2>/dev/null
   rm -f "/etc/systemd/system/$CUR_SVC.service" "$CUR_ENV"
   [ "$CUR_NAME" != "main" ] && rm -rf "$CUR_DIR" || warn "主实例目录保留（其它实例可能共享其代码）"
   systemctl daemon-reload
-  ok "已删除「$CUR_LABEL」"
+  ok "已删除「${CUR_LABEL}」"
   return 9
 }
 
@@ -555,17 +637,18 @@ inst_menu() {
     # 标题框宽度对齐主面板（用主面板实例列表框的宽度），不再只按标题宽度收窄
     local BOX_MIN="${LAST_BOX_INNER:-0}"
     if [ -n "$_note" ]; then
-      draw_box "🤖 $CUR_LABEL ${C_PINK}（$_note）${C_RESET}" "${C_DIM}$CUR_SVC${C_RESET} · $_st"
+      draw_box "🤖 $CUR_LABEL ${C_PINK}（${_note}）${C_RESET}" "${C_DIM}$CUR_SVC${C_RESET} · $_st"
     else
       draw_box "🤖 $CUR_LABEL" "${C_DIM}$CUR_SVC${C_RESET} · $_st"
     fi
     menu_row "「1」" "查看状态" "「2」" "配置机器人"   "「3」" "添加备注"
-    menu_row "「4」" "查看日志" "「5」" "删除此机器人" "「0」" "返回面板"
+    menu_row "「4」" "查看日志" "「5」" "删除此机器人" "「6」" "重启此机器人"
+    menu_row "「0」" "返回面板"
     divider
     ask n "  选择: " || return
     case "$n" in
       1) inst_status ;; 2) inst_config ;; 3) inst_note ;;
-      4) inst_log ;;
+      4) inst_log ;; 6) inst_restart ;;
       5) inst_uninstall; [ $? = 9 ] && return ;;
       0|q) return ;;
       *) warn "无效" ;;
@@ -581,20 +664,20 @@ inst_menu() {
 
 # 给某个机器人发一条测试消息
 _send_one() {  # $1=name $2=dir $3=env
-  local token chat px resp label
+  local token chat resp label
   token="$(get_val "$3" TG_BOT_TOKEN)"; chat="$(get_val "$3" TG_CHAT_ID)"
   label="$(display_name "$1" "$2" "$3")"
   if [ -z "$token" ] || [ -z "$chat" ]; then
-    err "「$label」未配置 token/chat_id"
+    err "「${label}」未配置 token/chat_id"
     return
   fi
-  px="$(proxy_args "$3")"
-  resp="$(curl -fsSL --connect-timeout 12 $px -d "chat_id=$chat" \
-    --data-urlencode "text=🔔 「$label」测试消息：配置正确，工作正常！" \
+  proxy_args "$3"
+  resp="$(curl -fsSL --connect-timeout 12 "${PROXY_ARGS[@]}" -d "chat_id=$chat" \
+    --data-urlencode "text=🔔 「${label}」测试消息：配置正确，工作正常！" \
     -d "parse_mode=HTML" "https://api.telegram.org/bot${token}/sendMessage" 2>&1)"
   printf '%s' "$resp" | grep -q '"ok":true' \
-    && ok "「$label」已发送" \
-    || { err "「$label」发送失败"; printf '%s' "$resp" | grep -oE '"description":"[^"]*"' | head -1 | sed 's/^/    /'; }
+    && ok "「${label}」已发送" \
+    || { err "「${label}」发送失败"; printf '%s' "$resp" | grep -oE '"description":"[^"]*"' | head -1 | sed 's/^/    /'; }
 }
 
 # 列出让用户选一个机器人，把选中的 name|dir|env|service 放进全局 PICKED
@@ -615,8 +698,18 @@ _pick_bot() {
     [ "$_pad" -lt 1 ] && _pad=1
     printf "   ${C_CYAN}「%d」${C_RESET} %s%*s %s\n" "$i" "$label" "$_pad" "" "$state"
   done <<< "$list"
-  [ -n "$extra" ] && echo -e "   ${C_CYAN}$extra${C_RESET}"
+  # 选择页也是一级页面，必须有「0」返回，否则选错了退不回去
+  if [ -n "$extra" ]; then
+    echo -e "   ${C_CYAN}$extra${C_RESET}    ${C_CYAN}「0」${C_RESET} 返回"
+  else
+    echo -e "   ${C_CYAN}「0」${C_RESET} 返回"
+  fi
+  divider
   ask _pc "  选择: " || return 1
+  # shellcheck disable=SC2154  # _pc 由上面的 ask 动态赋值，静态分析看不到
+  case "$_pc" in
+    0|q) warn "已取消"; return 1 ;;
+  esac
   if [ -n "$extra" ] && { [ "$_pc" = "a" ] || [ "$_pc" = "A" ]; }; then
     PICKED="all"; return 0
   fi
@@ -649,17 +742,34 @@ do_proxy_global() {
   echo -e "${C_BOLD}  配置全局代理${C_RESET} ${C_DIM}（所有机器人共用；安装时已配的话这里可改）${C_RESET}"
   local cur; cur="$(global_proxy)"
   [ -n "$cur" ] && echo "  当前代理: $cur" || echo "  当前代理: 直连（未配置）"
-  # 连通性检测（要等几秒，先给提示，别让用户以为卡死）
+  echo
+  # 连通性检测要走「当前实际生效的那条路」：配了代理就测代理，没配才测直连。
+  # 之前不管有没有配代理都只测直连 —— 国内服务器上明明代理是通的，
+  # 面板还是报「直连不通、需要配代理」，用户以为配置丢了，白配一遍。
   echo -e "  ${C_DIM}正在检测 Telegram 连通性，请稍候…${C_RESET}"
-  if curl -fsSL --connect-timeout 6 -o /dev/null https://api.telegram.org 2>/dev/null; then
+  local reachable=1
+  if [ -n "$cur" ]; then
+    if curl -fsSL --connect-timeout 8 -x "$cur" -o /dev/null https://api.telegram.org 2>/dev/null; then
+      ok "走代理 $cur 可连通 Telegram"
+      reachable=0
+    else
+      warn "走代理 $cur 连不通 Telegram（代理挂了，或地址/端口变了）"
+      echo -e "    ${C_DIM}机器人收发消息也会失败，建议重新填一个可用的地址${C_RESET}"
+    fi
+  elif curl -fsSL --connect-timeout 6 -o /dev/null https://api.telegram.org 2>/dev/null; then
     ok "当前可直连 Telegram"
+    reachable=0
   else
     warn "直连 Telegram 不通（国内服务器需要代理）"
   fi
   divider
   # 操作说明：回车=保持现状（点错了安全退出），输地址=修改，输「直连」=清除代理
   echo -e "  ${C_BOLD}怎么操作：${C_RESET}"
-  echo -e "    ${C_DIM}直接回车${C_RESET}   = 保持现状（点错了就这样退出，不会改动）"
+  if [ "$reachable" = "0" ]; then
+    echo -e "    ${C_DIM}直接回车${C_RESET}   = ${C_GREEN}保持现状（当前配置可用，不用改）${C_RESET}"
+  else
+    echo -e "    ${C_DIM}直接回车${C_RESET}   = 保持现状（点错了就这样退出，不会改动）"
+  fi
   echo -e "    ${C_DIM}输入地址${C_RESET}   = 改成这个代理（如 http://127.0.0.1:7890）"
   echo -e "    ${C_DIM}输入「直连」${C_RESET} = 清除代理，改回直连"
   local p
@@ -668,6 +778,17 @@ do_proxy_global() {
     ""|0)              warn "未做修改"; return ;;          # 回车/0 = 保持现状
     直连|direct|none|-) p="" ;;                             # 明确要直连才清代理
   esac
+  # 拿净化前的值判断「用户到底输没输东西」：格式不对要报错退回，
+  # 绝不能因为净化后变空就当成「清除代理」—— 输错字就把代理清掉太坑了。
+  local praw="$p"
+  p="$(normalize_proxy "$p")"
+  # 格式不对就拦下：与其存一个必然连不通的脏值、后面查半天，不如现在说清楚
+  if [ -n "$praw" ] && ! proxy_looks_ok "$p"; then
+    err "地址格式不对，已取消（什么都没改）"
+    echo -e "  ${C_DIM}正确写法：http://127.0.0.1:7890 或 socks5://127.0.0.1:1080${C_RESET}"
+    echo -e "  ${C_DIM}括号、引号、逗号这些不用带，首尾多余的符号我也会自动去掉${C_RESET}"
+    return
+  fi
   # 验证代理可达（只在设了代理时）
   if [ -n "$p" ]; then
     echo -e "  ${C_DIM}验证代理连通性…${C_RESET}"
@@ -703,39 +824,168 @@ do_proxy_global() {
   done <<< "$(list_instances)"
 }
 
-# 主页：重启服务（选一个机器人，或全部重启）
-do_restart_pick() {
-  echo -e "${C_BOLD}  重启服务${C_RESET}（选哪个机器人，或全部）"
-  _pick_bot "「a」全部重启" || return
-  if [ "$PICKED" = "all" ]; then
-    local entry n d e s
-    for entry in "${PICK_LIST[@]}"; do
-      IFS='|' read -r n d e s <<< "$entry"
-      systemctl restart "$s" 2>/dev/null && ok "已重启：$(display_name "$n" "$d" "$e")"
-    done
-  else
-    local n d e s
-    IFS='|' read -r n d e s <<< "$PICKED"
-    systemctl restart "$s" 2>/dev/null && ok "已重启：$(display_name "$n" "$d" "$e")"
+# 主页：改打开面板用的命令名（默认 unmi）
+do_panel_cmd() {
+  local cur; cur="$(panel_cmd)"
+  echo
+  draw_box left "${C_BOLD}面板命令名${C_RESET}" \
+    "${C_DIM}决定你敲什么命令打开这个面板${C_RESET}" \
+    "当前：${C_CYAN}${cur}${C_RESET}"
+  echo
+  echo -e "  ${C_BOLD}怎么操作：${C_RESET}"
+  echo -e "    ${C_DIM}直接回车${C_RESET}    = 保持现状（${cur}）"
+  echo -e "    ${C_DIM}输入新名字${C_RESET}  = 改成这个名字（字母/数字/-/_，如 tg、bot）"
+  echo -e "    ${C_DIM}输入「默认」${C_RESET}  = 改回 ${DEFAULT_PANEL_CMD}"
+  divider
+  local nn
+  ask nn "  命令名: " || return
+  case "$nn" in
+    ""|0)               warn "未做修改"; return ;;
+    默认|default|reset) nn="$DEFAULT_PANEL_CMD" ;;
+  esac
+  nn="$(printf '%s' "$nn" | tr -cd 'A-Za-z0-9_-')"
+  if [ -z "$nn" ]; then
+    err "名字只能用英文字母、数字、- 和 _（什么都没改）"; return
   fi
+  if [ "$nn" = "$cur" ]; then warn "就是这个，没变"; return; fi
+
+  # 别把系统里已有的命令顶掉（除非用户明确确认）
+  if command -v "$nn" >/dev/null 2>&1; then
+    warn "系统里已经有 ${nn} 这个命令了：$(command -v "$nn")"
+    local a
+    ask a "  仍要覆盖？输入 yes 确认，其它任意键取消: " || return
+    [ "$a" = "yes" ] || { warn "已取消"; return; }
+  fi
+
+  # 源文件用「当前正在跑的这个脚本」，不能用 $BASE/unmi-cli.sh ——
+  # 后者是安装时留下的副本，可能早就过时了（比如手动更新过 /usr/local/bin 之后），
+  # 从旧副本复制会让新命令莫名其妙回到旧版本。
+  local src="${BASH_SOURCE[0]:-$0}"
+  [ -f "$src" ] || src="$0"
+  [ -f "$src" ] || src="$BASE/unmi-cli.sh"
+  [ -f "$src" ] || { err "找不到面板脚本，无法创建命令"; return; }
+  install -m 755 "$src" "/usr/local/bin/$nn" || { err "创建 /usr/local/bin/$nn 失败"; return; }
+  # 顺手同步一份到框架目录，让两处保持一致，以后不会再出现版本差
+  [ -d "$BASE" ] && cp -f "$src" "$BASE/unmi-cli.sh" 2>/dev/null || true
+
+  # 删旧命令：内容对得上才删，避免误删别人的东西。
+  # 延后 1 秒执行 —— 旧命令可能正是当前在跑的这个脚本，
+  # 立刻删会让 bash 读不到后面的语句（bash 是边读边执行的）。
+  if [ -e "/usr/local/bin/$cur" ]; then
+    if [ "/usr/local/bin/$cur" = "$src" ] || cmp -s "$src" "/usr/local/bin/$cur"; then
+      (sleep 1; rm -f "/usr/local/bin/$cur") &
+      ok "已移除旧命令：$cur"
+    else
+      warn "/usr/local/bin/$cur 内容和本面板不一致，保留未删（避免误删）"
+    fi
+  fi
+
+  mkdir -p "$BASE/data"
+  printf '%s' "$nn" > "$PANEL_CMD_CONF"
+  ok "面板命令已改为：${C_BOLD}$nn${C_RESET}"
+  echo -e "  ${C_DIM}以后敲 ${C_CYAN}$nn${C_DIM} 打开面板${C_RESET}"
+}
+
+# 主页：重启面板（重启所有机器人服务，再重载控制台）
+do_restart_panel() {
+  local list; list="$(list_instances)"
+  if [ -z "$list" ]; then
+    echo
+    draw_box "${C_YELLOW}还没有机器人${C_RESET}" "${C_DIM}没有可重启的服务${C_RESET}"
+    pause
+    return
+  fi
+
+  # 先把要重启的都列出来，让用户确认前有个数
+  local lines=() name dir env svc
+  while IFS='|' read -r name dir env svc; do
+    lines+=("$(printf '%s  %s' "$(display_name "$name" "$dir" "$env")" "$(svc_state "$svc" text)")")
+  done <<< "$list"
+
+  echo
+  draw_box left "${C_BOLD}重启整个面板${C_RESET}"     "${C_DIM}将重启下面所有机器人服务，然后重载控制台${C_RESET}" "${lines[@]}"
+  echo
+  # 「确认重启整个面板」比默认列宽长，跟「返回」挤一行会贴在一起，分两行放
+  menu_row "「1」" "确认重启整个面板"
+  menu_row "「0」" "返回"
+  divider
+  local a
+  ask a "  选择: " || return
+  case "$a" in
+    1) ;;
+    0|q) warn "已取消"; return ;;
+    *) warn "无效选项"; return ;;
+  esac
+
+  # 逐个重启，结果先收起来最后一起展示。
+  # 不能边跑边print：重启完紧接着就要重载控制台（会 clear 屏），
+  # 结果一闪而过等于没看见，所以集中成一个结果页并等用户看完。
+  local res=() total=0 okc=0
+  while IFS='|' read -r name dir env svc; do
+    total=$((total + 1))
+    if systemctl restart "$svc" 2>/dev/null; then
+      okc=$((okc + 1))
+      res+=("${C_GREEN}✅${C_RESET} $(display_name "$name" "$dir" "$env")   ${C_DIM}已重启${C_RESET}")
+    else
+      res+=("${C_RED}❌${C_RESET} $(display_name "$name" "$dir" "$env")   ${C_RED}重启失败${C_RESET}")
+    fi
+  done <<< "$list"
+
+  echo
+  divider
+  draw_box left "${C_BOLD}重启结果${C_RESET}" "${res[@]}"
+  echo
+  if [ "$okc" = "$total" ]; then
+    echo -e "  ${C_GREEN}${C_BOLD}🎉 ${total} 个机器人全部重启成功${C_RESET}"
+  else
+    local bad=$((total - okc))
+    echo -e "  ${C_RED}${C_BOLD}⚠️  ${okc}/${total} 个成功，${bad} 个失败${C_RESET}"
+    echo -e "  ${C_DIM}失败的服务看日志：journalctl -u <服务名> -n 30${C_RESET}"
+  fi
+  echo
+
+  # 这里用「菜单」而不是「按回车继续」：重启本身要几秒，
+  # 用户等待期间习惯性敲的回车会被终端缓冲下来，等 read 一开始就立刻被吃掉，
+  # 结果页一闪而过等于没有。菜单要求明确输入 1 或 0，误敲的回车只会提示无效选项再问一次。
+  local c
+  while :; do
+    menu_row "「1」" "重载控制台" "「0」" "返回主菜单"
+    divider
+    ask c "  选择: " || return
+    case "$c" in
+      1) break ;;
+      0|q) return ;;
+      *) warn "无效选项（输 1 重载，输 0 返回）" ;;
+    esac
+  done
+  exec "${BASH_SOURCE[0]:-$0}"     # 重新跑一遍，界面回到干净的主页
 }
 
 # 主页：开 / 关机器人（选一个；运行中→停止，已停止→启动）
 do_toggle_bot() {
   echo -e "${C_BOLD}  开 / 关机器人${C_RESET}（选哪个）"
   _pick_bot || return
-  local n d e s label
+  local n d e s label act verb
   IFS='|' read -r n d e s <<< "$PICKED"
   label="$(display_name "$n" "$d" "$e")"
   if systemctl is-active --quiet "$s" 2>/dev/null; then
-    ask a "  「${label}」当前${C_GREEN}运行中${C_RESET}，要${C_BOLD}停止${C_RESET}它吗？[y/N] " || return
-    [ "$a" = "y" ] || { warn "已取消"; return; }
-    systemctl stop "$s" && ok "已停止「$label」"
+    act="stop"; verb="停止"
   else
-    ask a "  「${label}」当前${C_RED}已停止${C_RESET}，要${C_BOLD}启动${C_RESET}它吗？[y/N] " || return
-    [ "$a" = "y" ] || { warn "已取消"; return; }
-    systemctl start "$s" && ok "已启动「$label」"
+    act="start"; verb="启动"
   fi
+
+  echo
+  draw_box "🤖 $label"     "${C_DIM}当前状态：$(svc_state "$s" text)${C_RESET}"     "${C_DIM}确认${verb}这个机器人？${C_RESET}"
+  echo
+  menu_row "「1」" "确认${verb}" "「0」" "返回"
+  divider
+  local a
+  ask a "  选择: " || return
+  case "$a" in
+    1) systemctl "$act" "$s" && ok "已${verb}：$label" || err "${verb}失败：$label" ;;
+    0|q) warn "已取消" ;;
+    *) warn "无效选项" ;;
+  esac
 }
 
 # 主页：一键更新（更新框架 + 所有机器人 + unmi 命令，重启全部）
@@ -743,7 +993,8 @@ do_update_all() {
   echo -e "${C_BOLD}  一键更新${C_RESET}"
   local latest cur; cur="未知"; [ -f "$BASE/VERSION" ] && cur="$(cat "$BASE/VERSION")"
   echo "    当前: $cur"
-  latest="$(curl -fsSL --connect-timeout 12 $(proxy_args "$MAIN_ENV") \
+  proxy_args "$MAIN_ENV"
+  latest="$(curl -fsSL --connect-timeout 12 "${PROXY_ARGS[@]}" \
     "https://api.github.com/repos/unmime/unmi_TGtool/releases/latest" 2>/dev/null \
     | grep -oE '"tag_name":[[:space:]]*"[^"]+"' | head -1 | cut -d'"' -f4)"
   [ -z "$latest" ] && { err "获取最新版本失败（网络问题）"; return; }
@@ -761,7 +1012,8 @@ do_update_all() {
 
   local tmp; tmp="$(make_tmp)" || { err "无法创建临时目录"; return; }
   echo "    下载中…"
-  curl -fsSL --connect-timeout 20 $(proxy_args "$MAIN_ENV") \
+  proxy_args "$MAIN_ENV"
+  curl -fsSL --connect-timeout 20 "${PROXY_ARGS[@]}" \
     "https://github.com/unmime/unmi_TGtool/releases/download/${latest}/unmi_TGtool.tar.gz" \
     -o "$tmp/p.tgz" 2>/dev/null || { err "下载失败"; rm -rf "$tmp"; return; }
   # 解压必须先成功：脚本无 set -e，解压失败若继续会删掉各实例的 core/modules 却复制不上新文件
@@ -780,7 +1032,8 @@ do_update_all() {
     echo "$latest" > "$d/VERSION"
     rm -rf "$tmp/dbak"
   done
-  [ -f "$tmp/unmi_TGtool/unmi-cli.sh" ] && install -m 755 "$tmp/unmi_TGtool/unmi-cli.sh" /usr/local/bin/unmi
+  # 装到用户自定义的命令名下（不能写死 unmi，否则一更新就把自定义名字冲掉）
+  [ -f "$tmp/unmi_TGtool/unmi-cli.sh" ] && install -m 755 "$tmp/unmi_TGtool/unmi-cli.sh" "/usr/local/bin/$(panel_cmd)"
   rm -rf "$tmp"
 
   # 重启所有实例服务
@@ -793,10 +1046,34 @@ do_update_all() {
 
 # 主页：卸载整个面板（删除所有机器人 + 控制台本身）
 do_uninstall_panel() {
-  echo -e "${C_RED}${C_BOLD}  卸载整个 unmi_TGtool 面板${C_RESET}"
-  echo "    将删除：所有机器人（服务/配置/目录）、代码框架、unmi 命令"
+  # 列出会被删掉的机器人，让用户确认前知道自己要失去什么
+  local lines=("${C_RED}将删除：所有机器人的服务、配置、目录${C_RESET}"
+               "${C_RED}代码框架 ${BASE}、控制台命令${C_RESET}")
+  local list; list="$(list_instances)"
+  if [ -n "$list" ]; then
+    lines+=("")
+    local nm dr ev sv
+    while IFS='|' read -r nm dr ev sv; do
+      lines+=("${C_RED}✗${C_RESET} $(display_name "$nm" "$dr" "$ev")   ${C_DIM}$sv${C_RESET}")
+    done <<< "$list"
+  fi
+
   echo
-  ask a "    ${C_BOLD}确定要全部卸载？${C_RESET}输入 ${C_RED}yes${C_RESET} 确认: " || return
+  draw_box left "${C_RED}${C_BOLD}卸载整个面板${C_RESET}" "${lines[@]}"
+  echo
+  echo -e "  ${C_RED}${C_BOLD}这一步不可撤销${C_RESET} ${C_DIM}—— 每个 bot 的 token 会一起删掉，之后要重新添加${C_RESET}"
+  echo
+  menu_row "「1」" "确认卸载" "「0」" "返回"
+  divider
+  local a
+  ask a "  选择: " || return
+  case "$a" in
+    1) ;;
+    0|q) warn "已取消"; return ;;
+    *) warn "无效选项"; return ;;
+  esac
+  # 最后一道闸：这是面板里唯一不可撤销的操作，再要一次显式输入
+  ask a "    ${C_BOLD}真的要卸载？${C_RESET}输入 ${C_RED}yes${C_RESET} 确认，其它任意键取消: " || return
   [ "$a" = "yes" ] || { warn "已取消"; return; }
   local name dir env svc
   while IFS='|' read -r name dir env svc; do
@@ -808,7 +1085,7 @@ do_uninstall_panel() {
   systemctl daemon-reload
   echo
   ok "已全部卸载，unmi 命令将于退出后移除"
-  (sleep 1; rm -f /usr/local/bin/unmi) &
+  (sleep 1; rm -f "/usr/local/bin/$(panel_cmd)") &
   exit 0
 }
 
@@ -887,8 +1164,8 @@ EOF
   fi
   echo
   menu_row "「A」" "添加机器人" "「T」" "发送测试"   "「S」" "开关机器人"
-  menu_row "「R」" "重启服务"   "「P」" "配置代理"   "「U」" "一键更新"
-  menu_row "「X」" "卸载面板"   "「0」" "退出"
+  menu_row "「R」" "重启面板"   "「P」" "配置代理"   "「U」" "一键更新"
+  menu_row "「N」" "面板命令名" "「X」" "卸载面板" "「0」" "退出"
   divider
 
   local n
@@ -897,9 +1174,10 @@ EOF
     a|A) add_bot; pause ;;
     t|T) do_send_test; pause ;;
     s|S) do_toggle_bot; pause ;;
-    r|R) do_restart_pick; pause ;;
+    r|R) do_restart_panel; pause ;;
     p|P) do_proxy_global; pause ;;
     u|U) do_update_all; pause ;;
+    n|N) do_panel_cmd; pause ;;
     x|X) do_uninstall_panel ;;
     0|q) echo "  再见"; exit 0 ;;
     ''|*[!0-9]*) warn "无效选项" ;;

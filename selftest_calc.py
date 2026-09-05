@@ -104,7 +104,9 @@ def main():
     for payload in [
         "().__class__", "[].__class__", "(1).__class__",
         "().__class__.__bases__[0].__subclasses__()",
-        "lambda:1", "1 if 1 else 2", "[1,2]", "{1:2}", "{1}",
+        # 注：{1} / [1] 现在按「花括号/方括号当小括号」处理，等价 (1)，不再算逃逸；
+        #     [1,2] 转成 (1,2) 是元组，仍被求值器拒绝；{1:2} 直接语法错误
+        "lambda:1", "1 if 1 else 2", "[1,2]", "{1:2}",
         "1;2", "print(1)", "eval('1')", "exec('1')", "__import__('os')",
         "globals()", "locals()", "vars()", "dir()", "getattr(1,'real')",
         "().__doc__", "1j", "open('/etc/passwd').read()",
@@ -183,6 +185,55 @@ def main():
     for cb_data in ["calcset:dec:3", "calcset:fmt:eq", "calcset:conv:toggle",
                     "calcset:cmode:acct", "calcset:open"]:
         check(u"回调 %s" % cb_data, bool(calc.handle_cb(cb_data)), True)
+
+    # ------------------------------------------------- 括号写法 / 函数名带数字
+    print("[13] 括号写法与函数名解析")
+    def first(expr):
+        # 取「=右边的值」，去掉 </code> 尾巴
+        return calc.format_result(expr).split("\n")[0].split("=")[1].replace("</code>", "")
+
+    # 花括号/方括号一律当小括号 —— 之前这几种字符不在字符白名单里，
+    # 整条式子会被当成普通聊天不计算
+    check(u"花括号", calc.format_result("9856+9952/{(695*6523)-9854}*9").split("\n")[0].split("=")[0],
+          "<code>9856+9952/((695*6523)-9854)*9")
+    check(u"花括号可算", first("9856+9952/{(695*6523)-9854}*9"),
+          first("9856+9952/((695*6523)-9854)*9"))
+    check(u"方括号", calc.format_result("2*[3+4]").split("\n")[0].split("=")[0], "<code>2*(3+4)")
+    check(u"三层混用", first("{(2+3)*[4-1]}"), "15")
+    check(u"全角花括号", first("｛2+3｝"), "5")
+
+    # 函数名以数字结尾的（log2 / log10）曾被隐式乘法拆坏成 log2*(8)
+    for fn, expr, want in [
+        ("log2", "log2(8)", "3"),
+        ("log10", "log10(100)", "2"),
+        ("log10 复合", "log10(1000)/log10(10)", "3"),
+        ("log2 复合", "2*log2(8)+log10(100)", "8"),
+    ]:
+        got = first(expr)
+        check(u"函数名带数字 %s" % fn, got, want)
+
+    # 普通隐式乘法不能被上面的修复误伤
+    for expr, want in [("2(3)", "6"), ("10(3)", "30"), ("2sqrt(4)", "4"),
+                       ("3(4+5)", "27"), ("2pi", None), ("100(2)", "200")]:
+        got = first(expr)
+        check(u"隐式乘法 %s" % expr, got, want if want else got)
+
+    # ------------------------------------------------- 新增函数
+    print("[14] 新增函数")
+    cases = [
+        ("hypot(3,4)", "5"), ("sign(-5)", "-1"), ("sign(0)", "0"), ("sign(3.7)", "1"),
+        ("comb(5,2)", "10"), ("ncr(49,6)", "13983816"), ("perm(5,2)", "20"),
+        ("npr(10,3)", "720"), ("gamma(5)", "24"), ("nthroot(27,3)", "3"),
+        ("nthroot(-27,3)", "-3"), ("nthroot(16,4)", "2"),
+        ("avg(1,2,3,4)", "2.5"), ("mean(10,20)", "15"), ("sum(1,2,3,4,5)", "15"),
+    ]
+    for expr, want in cases:
+        check(u"函数 %s" % expr, first(expr), want)
+    # 边界与报错
+    expect_err("comb 负数", calc.format_result, "comb(-1,1)")
+    check("comb(2,5)=0（k>n 不报错）", first("comb(2,5)"), "0")
+    expect_err("nthroot 偶次根负数", calc.format_result, "nthroot(-16,4)")
+    expect_err("nthroot 0 次根", calc.format_result, "nthroot(8,0)")
     check("收起回调", calc.handle_cb("calcset:close").get("close"), True)
     expect_err("未知回调被拒", calc.handle_cb, "calcset:bogus:1")
 

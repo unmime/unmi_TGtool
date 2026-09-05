@@ -12,13 +12,13 @@
 #
 # 装完得到什么：
 #   · /opt/unmi_TGtool      代码框架（所有机器人共享）
-#   · /usr/local/bin/unmi   控制台命令（敲 unmi 管理 / 添加更多机器人）
+#   · /usr/local/bin/unmi   控制台命令（默认 unmi，可在面板里改成别的名字）
 #   · 你的第一个机器人（在引导里配置并启动）
 #===============================================================================
 set -euo pipefail
 
 # ---- 常量 ----
-VERSION="v1.0.0.0"
+VERSION="v1.0.0.1"
 REPO="unmime/unmi_TGtool"
 TAR_URL="https://github.com/${REPO}/releases/download/${VERSION}/unmi_TGtool.tar.gz"
 APP_DIR="/opt/unmi_TGtool"
@@ -36,6 +36,7 @@ fi
 tty_read() {
   local __v="$1"; shift
   printf '%s' "$*" > /dev/tty 2>/dev/null || printf '%s' "$*"
+  # shellcheck disable=SC2229  # "$__v" 是故意的：按调用方传入的变量名动态赋值
   read -r "$__v" < /dev/tty 2>/dev/null || read -r "$__v" || return 1
 }
 
@@ -102,11 +103,16 @@ download() {
   ok "框架就绪"
 }
 
-# ---- 装 unmi 控制台命令 ----
+# ---- 装控制台命令（默认 unmi；重装时沿用用户改过的名字）----
+PANEL_CMD="unmi"
+
 install_cli() {
   step "安装 unmi 控制台"
-  install -m 755 "$APP_DIR/unmi-cli.sh" /usr/local/bin/unmi
-  ok "以后敲 ${C_BOLD}unmi${C_RESET} 打开控制台"
+  # 重装时沿用用户之前改过的命令名，别把人家的习惯打回 unmi
+  local saved; saved="$(tr -d ' \t\r\n' < "$APP_DIR/data/panel-cmd.conf" 2>/dev/null)"
+  [ -n "$saved" ] && PANEL_CMD="$saved"
+  install -m 755 "$APP_DIR/unmi-cli.sh" "/usr/local/bin/$PANEL_CMD"
+  ok "以后敲 ${C_BOLD}${PANEL_CMD}${C_RESET} 打开控制台"
 }
 
 # ---- 安装时检测网络，连不上 Telegram 就配代理（写全局，所有机器人共用）----
@@ -122,6 +128,9 @@ detect_proxy() {
   local p r
   while :; do
     tty_read p "  ${C_BOLD}代理地址${C_RESET}（如 http://127.0.0.1:7890）: " || return
+    # 去掉首尾误粘的括号/引号/空白：提示语里的括号经常被一起复制进来，
+    # 存成 http://127.0.0.1:7890） 这种脏值，之后会莫名连不通且极难排查
+    p="$(printf '%s' "$p" | sed 's/^[^A-Za-z0-9]*//; s/[^A-Za-z0-9/:._~%@+-]*$//')"
     if [ -z "$p" ]; then
       warn "连不上 Telegram 时必须配代理，否则机器人无法收发消息"
       continue
@@ -151,7 +160,7 @@ finish() {
   echo -e "  即将进入${C_BOLD}控制台主页${C_RESET}，你可以："
   echo -e "    ${C_CYAN}a${C_RESET}) 添加机器人    ${C_CYAN}p${C_RESET}) 配置全局代理    ${C_CYAN}u${C_RESET}) 一键更新"
   echo
-  echo -e "  ${C_DIM}（以后随时敲 ${C_CYAN}unmi${C_RESET}${C_DIM} 都能回到这个主页）${C_RESET}"
+  echo -e "  ${C_DIM}（以后随时敲 ${C_CYAN}${PANEL_CMD}${C_RESET}${C_DIM} 都能回到这个主页）${C_RESET}"
   echo
   # 进入控制台主菜单（read 从 /dev/tty 读，兼容 curl|bash）
   unmi || true

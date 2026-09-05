@@ -37,8 +37,8 @@ _TRANS = {
     ord(u"＊"): u"*", ord(u"×"): u"*", ord(u"✕"): u"*", ord(u"⋅"): u"*",
     ord(u"·"): u"*", ord(u"／"): u"/", ord(u"÷"): u"/", ord(u"∕"): u"/",
     ord(u"％"): u"%", ord(u"＾"): u"^", ord(u"（"): u"(", ord(u"）"): u")",
-    ord(u"【"): u"(", ord(u"】"): u")", ord(u"［"): u"[", ord(u"］"): u"]",
-    ord(u"｛"): u"{", ord(u"｝"): u"}", ord(u"，"): u",", ord(u"、"): u",",
+    ord(u"【"): u"(", ord(u"】"): u")", ord(u"［"): u"(", ord(u"］"): u")",
+    ord(u"｛"): u"(", ord(u"｝"): u")", ord(u"，"): u",", ord(u"、"): u",",
     ord(u"。"): u".", ord(u"．"): u".", ord(u"＝"): u"=", ord(u"？"): u"?",
     ord(u"＇"): u"'", ord(u"＂"): u'"', ord(u"　"): u" ", ord(u" "): u" ",
 }
@@ -52,10 +52,6 @@ _OPERATORS = set(u"+-*/^%")
 _IPV4_RE = re.compile(r"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}")
 
 # 允许出现在算式里的标识符（函数 / 常量）
-_WORDS = set("""pi e tau phi sqrt cbrt abs fabs floor ceil round trunc
-ln log lg log10 log2 exp sin cos tan asin acos atan sinh cosh tanh
-degrees radians rad deg factorial fact pow gcd lcm max min""".split())
-
 _TOKEN_RE = re.compile(r"[0-9A-Za-z._]+")
 _SCI_RE = re.compile(r"^\d+(\.\d+)?[eE][+-]?\d+$")
 # 写了一半的科学计数法：1e / 1e+ / 2.5e- —— 标准计算器一律报错。
@@ -109,8 +105,22 @@ def _insert_implicit_mul(s):
         _protect, s)
     # 1. ) 后接 ( / 数字 / 字母：)→ )*
     s = re.sub(r"\)(?=[(\dA-Za-z])", ")*", s)
-    # 2. 数字 后接 ( / 字母：数字 → 数字*（进制/科学计数法已保护，不会误伤）
-    s = re.sub(r"(\d)(?=[(A-Za-z])", r"\1*", s)
+    # 2. 数字 后接 ( / 字母：数字 → 数字*（进制/科学计数法已保护，不会误伤）。
+    #    但如果这个数字本身就是标识符的一部分（如 log10 末尾的 0），不能补 ——
+    #    否则 log10(100) 会被拆成 log10*(100)，报「不支持的符号 log10」。
+    #    判断：从匹配位置往前扫，若一路都是字母数字下划线且最前面是字母，
+    #    说明它是标识符的一部分（log10 的 0 前面是 1、再往前是 log）。
+    #    注意只往前看一位不够：log2 能过、log10 就漏了（0 前面是数字 1）。
+    def _digit_mul(m):
+        i = m.start()
+        j = i
+        while j > 0 and (s[j - 1].isalnum() or s[j - 1] == "_"):
+            j -= 1
+        if j < i and s[j].isalpha():
+            return m.group(1)
+        return m.group(1) + "*"
+
+    s = re.sub(r"(\d)(?=[(A-Za-z])", _digit_mul, s)
     # 3. 常量名 后接 (：pi( e( tau( phi( → 加 *
     for cst in ("pi", "e", "tau", "phi"):
         s = re.sub(r"(?<![A-Za-z0-9_])" + cst + r"(?=\()", cst + "*", s)
@@ -125,6 +135,10 @@ def _pre_normalize(text):
     畸形输入检测必须看这一层：`1e` 一旦被补成 `1*e`，就看不出它是残缺的科学计数法了。
     """
     s = str(text or "").translate(_TRANS)
+    # 方括号/花括号一律当小括号 —— 用户常写 {[(2+3)]} 这种分层括号，
+    # 原来这几种字符不在字符白名单里，整条式子会被当成普通聊天不计算
+    s = re.sub(r"[\[\{]", "(", s)
+    s = re.sub(r"[\]\}]", ")", s)
     s = re.sub(r"\s+", "", s)
     # 去掉结尾的 = ? 等
     s = s.rstrip(u"=?？＝")
@@ -295,6 +309,65 @@ def _fn_lcm(*args):
     return Fraction(r)
 
 
+def _int_args(name, *args):
+    """校验全是非负整数，返回 int 列表；否则报错。"""
+    out = []
+    for a in args:
+        if a.denominator != 1 or a < 0:
+            raise CalcError("%s 只接受非负整数" % name)
+        out.append(int(a))
+    return out
+
+
+def _fn_comb(n, k):
+    """组合数 C(n,k)。用 Fraction 递推，精确且不依赖 math.comb（3.8 才有）。"""
+    n, k = _int_args("comb", n, k)
+    if k > n:
+        return Fraction(0)
+    if n > 100000:
+        raise CalcError("comb 的 n 太大（上限 100000）")
+    k = min(k, n - k)
+    r = Fraction(1)
+    for i in range(1, k + 1):
+        r = r * (n - k + i) / i
+    return r
+
+
+def _fn_perm(n, k):
+    """排列数 P(n,k) = n!/(n-k)!。"""
+    n, k = _int_args("perm", n, k)
+    if k > n:
+        return Fraction(0)
+    if n > 100000:
+        raise CalcError("perm 的 n 太大（上限 100000）")
+    r = Fraction(1)
+    for i in range(n - k + 1, n + 1):
+        r *= i
+    return r
+
+
+def _fn_nthroot(x, n):
+    """n 次方根。奇次根允许负数，偶次根要求非负。"""
+    if n == 0:
+        raise CalcError("0 次方根无意义")
+    if x < 0:
+        if n.denominator == 1 and int(n) % 2 == 1:
+            return -_safe_pow(-x, Fraction(1) / n)
+        raise CalcError("负数不能开偶次方根")
+    return _safe_pow(x, Fraction(1) / n)
+
+
+def _fn_gamma(x):
+    try:
+        return _f(math.gamma(float(x)))
+    except (OverflowError, ValueError):
+        raise CalcError("gamma 溢出或无定义")
+
+
+def _fn_hypot(*args):
+    return _f(math.hypot(*[float(a) for a in args]))
+
+
 def _trig(fn, name):
     def _inner(x):
         return _f(fn(float(x)))
@@ -335,7 +408,19 @@ FUNCS = {
     "pow": (2, 2, lambda x, y: _safe_pow(x, y)),
     "gcd": (2, 6, _fn_gcd), "lcm": (2, 6, _fn_lcm),
     "max": (2, 8, lambda *a: max(a)), "min": (2, 8, lambda *a: min(a)),
+    "hypot": (2, 8, _fn_hypot),                      # 直角三角形斜边 / 欧几里得范数
+    "sign": (1, 1, lambda x: Fraction((x > 0) - (x < 0))),
+    "comb": (2, 2, _fn_comb), "ncr": (2, 2, _fn_comb),     # 组合数 C(n,k)
+    "perm": (2, 2, _fn_perm), "npr": (2, 2, _fn_perm),     # 排列数 P(n,k)
+    "gamma": (1, 1, _fn_gamma), "lgamma": (1, 1, lambda x: _f(math.lgamma(float(x)))),
+    "nthroot": (2, 2, _fn_nthroot),                  # n 次方根
+    "avg": (2, 8, lambda *a: sum(a) / len(a)), "mean": (2, 8, lambda *a: sum(a) / len(a)),
+    "sum": (2, 8, lambda *a: sum(a)),
 }
+
+# 字母白名单直接由函数表 + 常量表推导。
+# 之前这里是手写的一份列表，和 FUNCS 各维护各的，迟早漂移 —— 推导出来就不会再不同步。
+_WORDS = set(FUNCS) | set(CONSTS)
 
 
 def _safe_pow(base, exp):

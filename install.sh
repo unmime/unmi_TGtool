@@ -44,8 +44,11 @@ install -m 644 "$SRC_DIR/main.py" "$APP_DIR/"
 [ -f "$SRC_DIR/VERSION" ] && install -m 644 "$SRC_DIR/VERSION" "$APP_DIR/VERSION"
 # 控制台命令：不装的话装完还得再跑一遍在线脚本才能用 unmi
 if [ -f "$SRC_DIR/unmi-cli.sh" ]; then
-  install -m 755 "$SRC_DIR/unmi-cli.sh" /usr/local/bin/unmi
-  echo "    已安装控制台命令：unmi"
+  # 重装时沿用用户改过的命令名（存运行数据目录，不会被代码覆盖）
+  PANEL_CMD="$(tr -d ' \t\r\n' < "$APP_DIR/data/panel-cmd.conf" 2>/dev/null)"
+  PANEL_CMD="${PANEL_CMD:-unmi}"
+  install -m 755 "$SRC_DIR/unmi-cli.sh" "/usr/local/bin/$PANEL_CMD"
+  echo "    已安装控制台命令：$PANEL_CMD"
 fi
 [ -f "$SRC_DIR/selftest_calc.py" ] && install -m 644 "$SRC_DIR/selftest_calc.py" "$APP_DIR/"
 [ -f "$SRC_DIR/selftest_public.py" ] && install -m 644 "$SRC_DIR/selftest_public.py" "$APP_DIR/"
@@ -60,7 +63,10 @@ EOF
 chmod 600 "$ENV_FILE"
 
 echo "==> 离线自检"
-set -a; . "$ENV_FILE"; set +a
+set -a
+# shellcheck source=/dev/null   # ENV_FILE 是变量路径，shellcheck 无法静态跟踪
+. "$ENV_FILE"
+set +a
 python3 "$APP_DIR/main.py" --dry-run
 
 echo "==> 安装 systemd 服务"
