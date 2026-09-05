@@ -26,6 +26,11 @@ class BotContext(object):
 
     # ------------------------------------------------------------------ API
     def api(self, method, params):
+        # 兼容旧核心直接传 dict/list 的 reply_markup（原 JSON body 传输的写法），
+        # 统一序列化成 JSON 字符串再走表单编码，否则 Telegram 400 解析失败
+        params = {k: (json.dumps(v, ensure_ascii=False)
+                      if isinstance(v, (dict, list)) else v)
+                  for k, v in params.items()}
         data = urllib.parse.urlencode(params).encode("utf-8")
         req = urllib.request.Request("%s/%s" % (self.api_base, method),
                                      data=data, method="POST")

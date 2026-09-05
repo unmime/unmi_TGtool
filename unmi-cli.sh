@@ -398,6 +398,8 @@ inst_menu() {
       0|q) return ;;
       *) warn "无效" ;;
     esac
+    # 每个操作完成后暂停，让用户看到结果（否则新菜单会把反馈顶出屏幕）
+    printf "  ${C_DIM}按回车继续…${C_RESET}"; read -r _
   done
 }
 
@@ -449,7 +451,7 @@ EOF
   local n
   printf "  选择（数字进入管理）: "; read -r n
   case "$n" in
-    a|A) add_bot ;;
+    a|A) add_bot; printf "  ${C_DIM}按回车继续…${C_RESET}"; read -r _ ;;
     0|q) echo "  再见"; exit 0 ;;
     ''|*[!0-9]*) warn "无效选项" ;;
     *)
