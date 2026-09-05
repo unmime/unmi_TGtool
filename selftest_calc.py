@@ -297,7 +297,7 @@ def main():
     except calc.CalcError as e:
         check("超时提示含「自动退出」", u"自动退出" in str(e), True)
     _t3, _kb3 = calc.settings_panel()
-    check("面板显示已超时", u"已超时退出" in _t3, True)
+    check("面板显示已超时", u"已超时" in _t3, True)
     check("面板含 /00 说明", u"/00" in _t3, True)
     calc.set_settings(conv_on=True, conv_mode="both")
 

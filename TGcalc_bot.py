@@ -858,24 +858,19 @@ def settings_panel():
     if not ans_on:
         ans_txt = u"关闭"
     elif prev is None:
-        ans_txt = u"开启（暂无记录）" if not s.get("ans") else u"开启（已超时退出）"
+        ans_txt = (u"开启（暂无记录 · /00 退出）" if not s.get("ans")
+                   else u"开启（已超时 · /00 退出）")
     else:
-        ans_txt = u"开启 · 上次 %s" % format_value(prev)[0]
+        ans_txt = u"开启 · 上次 %s · /00 退出" % format_value(prev)[0]
     text = (
         u"⚙️ <b>计算器设置</b>\n\n"
         u"1️⃣ <b>小数位保留</b>（当前 <b>%d</b> 位）\n"
         u"2️⃣ <b>结果显示格式</b>（当前：%s）\n"
         u"3️⃣ <b>结果转换</b>（%s · %s）\n"
         u"4️⃣ <b>连续计算</b>（%s）\n\n"
-        u"%s"
         u"<i>点选项立即生效并保存；点「收起」关闭面板。</i>"
         % (s["decimals"], FMT_LABEL[s["fmt"]], conv_txt, CONV_LABEL[s["conv_mode"]],
-           ans_txt,
-           (u"连续计算已开启：直接发 <code>+3</code> <code>*2</code> <code>/4</code> "
-            u"<code>-5</code> <code>^2</code> 即对上次结果运算。\n"
-            u"发 <code>/00</code> 退出；<b>%d 分钟</b>没操作自动退出。\n\n"
-            % (CONT_TIMEOUT // 60))
-           if ans_on else u"")
+           ans_txt)
     )
     kb = [
         # 小数位 6 档拆两行（3+3），否则勾选标记会把按钮挤到被 Telegram 截断
