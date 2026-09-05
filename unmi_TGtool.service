@@ -1,0 +1,17 @@
+[Unit]
+Description=unmi_TGtool - Telegram Tool Kit
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/unmi_TGtool.env
+WorkingDirectory=/opt/unmi_TGtool
+ExecStart=/usr/bin/python3 /opt/unmi_TGtool/TGcalcbot.py
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

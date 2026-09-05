@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+*.pyo
+
+# 运行时生成的个人设置与凭据，不要提交
+calc_settings.json
+*.env
+.env
+
+.DS_Store
+.idea/
+.vscode/
+.DS_Store
+.DS_Store
