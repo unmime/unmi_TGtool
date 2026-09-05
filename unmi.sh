@@ -14,7 +14,7 @@
 set -euo pipefail
 
 # ---- 常量 ----
-VERSION="v2.0.1"
+VERSION="v2.0.2"
 REPO="wazakid/unmi_TGtool"
 TAR_URL="https://github.com/${REPO}/releases/download/${VERSION}/unmi_TGtool.tar.gz"
 APP_DIR="/opt/unmi_TGtool"
@@ -129,15 +129,47 @@ ask_config() {
   ok "已获取配置"
 }
 
+# ---- 装 unmi 终端面板命令 ----
+install_cli() {
+  step "安装 unmi 终端面板"
+  if [ -f "$APP_DIR/unmi-cli.sh" ]; then
+    install -m 755 "$APP_DIR/unmi-cli.sh" /usr/local/bin/unmi
+    ok "以后在终端敲 ${C_BOLD}unmi${C_RESET} 即可调出控制面板"
+  fi
+}
+
+# ---- 网络检测 + 代理（国内服务器连不上 api.telegram.org 时提示）----
+detect_proxy() {
+  step "网络连通性检查"
+  PROXY=""
+  if curl -fsSL --connect-timeout 6 -o /dev/null https://api.telegram.org 2>/dev/null; then
+    ok "可以直连 Telegram"
+    return
+  fi
+  warn "连不上 api.telegram.org（国内服务器常见，需要走代理）"
+  printf "  ${C_BOLD}代理地址${C_RESET}（如 http://127.0.0.1:7890，留空跳过）: " > /dev/tty
+  read -r PROXY < /dev/tty
+  if [ -n "$PROXY" ]; then
+    if curl -fsSL --connect-timeout 8 -x "$PROXY" -o /dev/null https://api.telegram.org 2>/dev/null; then
+      ok "走代理 $PROXY 可以连通"
+    else
+      warn "走 $PROXY 也连不通，请确认代理可用（可稍后敲 unmi 选 4 重配）"
+    fi
+  else
+    warn "未配置代理，bot 将无法连接 Telegram（可稍后敲 unmi 选 4 配置）"
+  fi
+}
+
 # ---- 写配置 ----
 write_env() {
   step "写入配置 $ENV_FILE"
   umask 077
-  cat > "$ENV_FILE" <<EOF
-TG_BOT_TOKEN=$TOKEN
-TG_CHAT_ID=$CHAT
-DATA_DIR=$APP_DIR/data
-EOF
+  {
+    echo "TG_BOT_TOKEN=$TOKEN"
+    echo "TG_CHAT_ID=$CHAT"
+    echo "DATA_DIR=$APP_DIR/data"
+    [ -n "${PROXY:-}" ] && echo "https_proxy=$PROXY"
+  } > "$ENV_FILE"
   chmod 600 "$ENV_FILE"
   ok "配置已写入（权限 600）"
 }
@@ -165,18 +197,22 @@ send_test() {
   local text="🎉 unmi_TGtool 安装成功！%0A%0A直接发算式就能算，比如发 66*98%0A/calc 打开设置面板%0A/help 查看已加载模块"
   local url="https://api.telegram.org/bot${TOKEN}/sendMessage"
   local resp=""
+  local px=""
+  [ -n "${PROXY:-}" ] && px="-x $PROXY"
   if command -v curl >/dev/null 2>&1; then
-    resp=$(curl -fsSL --connect-timeout 10 \
+    resp=$(curl -fsSL --connect-timeout 12 $px \
       -d "chat_id=${CHAT}" -d "text=${text}" -d "parse_mode=HTML" "$url" 2>/dev/null) || resp=""
   else
-    resp=$(wget -q --timeout=10 \
+    resp=$(wget -q --timeout=12 -e "use_proxy=yes" -e "https_proxy=$PROXY" \
       --post-data "chat_id=${CHAT}&text=${text}&parse_mode=HTML" -O- "$url" 2>/dev/null) || resp=""
   fi
   if printf '%s' "$resp" | grep -q '"ok":true'; then
     ok "测试消息已发到你的 Telegram，去看看"
   else
-    warn "测试消息没发出去（token/chat_id 可能有误，或你还没给 bot 发过任何消息）"
-    echo  "      先在 Telegram 里给 bot 发条消息，再发 66*98 手动验证"
+    warn "测试消息没发出去"
+    printf '%s' "$resp" | grep -oE '"description":"[^"]*"' | head -1 | sed 's/^/      /'
+    echo  "      常见原因：token/chat_id 不对、没先给 bot 发过消息、或网络不通"
+    echo  "      排查：敲 unmi → 2 检查配置 / 3 重发测试 / 4 配代理"
   fi
 }
 
@@ -191,6 +227,9 @@ usage() {
   echo -e "    ${C_CYAN}66*98${C_RESET}     直接算，出结果 + 中文读法 + 会计大写"
   echo -e "    ${C_CYAN}/calc${C_RESET}     打开设置面板（小数位 / 格式 / 连续计算）"
   echo -e "    ${C_CYAN}/help${C_RESET}     查看已加载模块"
+  echo
+  echo -e "${C_BOLD}  控制面板${C_RESET}："
+  echo -e "    ${C_CYAN}unmi${C_RESET}              调出终端面板（配置 / 测试 / 代理 / 卸载）"
   echo
   echo -e "${C_BOLD}  常用运维${C_RESET}："
   echo    "    systemctl status  $SERVICE      查看状态"
@@ -211,7 +250,9 @@ main() {
   check_conflict
   download
   ask_config
+  detect_proxy
   write_env
+  install_cli
   setup_service
   send_test
   usage
