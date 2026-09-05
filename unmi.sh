@@ -3,10 +3,10 @@
 # unmi_TGtool 一键安装脚本
 #
 # 推荐用法（process substitution，stdin 仍是终端，可正常交互）：
-#   bash <(curl -sL https://raw.githubusercontent.com/wazakid/unmi_TGtool/main/unmi.sh)
+#   bash <(curl -sL https://raw.githubusercontent.com/unmime/unmi_TGtool/main/unmi.sh)
 #
 # 也兼容管道方式（脚本内 read 强制从 /dev/tty 读，依然可交互）：
-#   curl -sL https://raw.githubusercontent.com/wazakid/unmi_TGtool/main/unmi.sh | bash
+#   curl -sL https://raw.githubusercontent.com/unmime/unmi_TGtool/main/unmi.sh | bash
 #
 # 流程：艺术字 -> 环境检查 -> 下载框架 -> 装 unmi 控制台 -> 引导添加第一个机器人
 #
@@ -19,7 +19,7 @@ set -euo pipefail
 
 # ---- 常量 ----
 VERSION="v3.1.0"
-REPO="wazakid/unmi_TGtool"
+REPO="unmime/unmi_TGtool"
 TAR_URL="https://github.com/${REPO}/releases/download/${VERSION}/unmi_TGtool.tar.gz"
 APP_DIR="/opt/unmi_TGtool"
 

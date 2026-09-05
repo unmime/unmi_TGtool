@@ -12,7 +12,7 @@
 用 `root` 执行下面**一条命令**，自动完成下载、安装、配置，装完直接能用：
 
 ```bash
-bash <(curl -sL https://raw.githubusercontent.com/wazakid/unmi_TGtool/main/unmi.sh)
+bash <(curl -sL https://raw.githubusercontent.com/unmime/unmi_TGtool/main/unmi.sh)
 ```
 
 过程中会提示你输入 **Bot Token** 和 **Chat ID**（去 @BotFather 建 bot 拿 token，
@@ -25,8 +25,8 @@ bash <(curl -sL https://raw.githubusercontent.com/wazakid/unmi_TGtool/main/unmi.
 
 ```bash
 # 1) 下载（二选一）
-wget https://github.com/wazakid/unmi_TGtool/releases/latest/download/unmi_TGtool.tar.gz
-# 或： curl -LO https://github.com/wazakid/unmi_TGtool/releases/latest/download/unmi_TGtool.tar.gz
+wget https://github.com/unmime/unmi_TGtool/releases/latest/download/unmi_TGtool.tar.gz
+# 或： curl -LO https://github.com/unmime/unmi_TGtool/releases/latest/download/unmi_TGtool.tar.gz
 
 # 2) 解压安装（tar 包带顶层目录 unmi_TGtool/）
 tar xzf unmi_TGtool.tar.gz && cd unmi_TGtool

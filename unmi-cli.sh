@@ -356,7 +356,7 @@ inst_update() {
   local latest cur; cur="未知"; [ -f "$CUR_DIR/VERSION" ] && cur="$(cat "$CUR_DIR/VERSION")"
   echo "    当前: $cur"
   latest="$(curl -fsSL --connect-timeout 12 $(cproxy) \
-    "https://api.github.com/repos/wazakid/unmi_TGtool/releases/latest" 2>/dev/null \
+    "https://api.github.com/repos/unmime/unmi_TGtool/releases/latest" 2>/dev/null \
     | grep -oE '"tag_name":[[:space:]]*"[^"]+"' | head -1 | cut -d'"' -f4)"
   [ -z "$latest" ] && { err "获取最新版本失败（网络问题）"; return; }
   echo "    最新: $latest"
@@ -366,7 +366,7 @@ inst_update() {
   read -r a; [ "$a" = "y" ] || { warn "已取消"; return; }
   local tmp; tmp="$(mktemp -d)"
   curl -fsSL --connect-timeout 20 $(cproxy) \
-    "https://github.com/wazakid/unmi_TGtool/releases/download/${latest}/unmi_TGtool.tar.gz" \
+    "https://github.com/unmime/unmi_TGtool/releases/download/${latest}/unmi_TGtool.tar.gz" \
     -o "$tmp/p.tgz" 2>/dev/null || { err "下载失败"; rm -rf "$tmp"; return; }
   cp -r "$CUR_DIR/data" "$tmp/dbak" 2>/dev/null || true
   # 解压必须先成功：脚本无 set -e，解压失败若继续会删掉 core/modules 却复制不上新文件
@@ -542,7 +542,7 @@ do_update_all() {
   local latest cur; cur="未知"; [ -f "$BASE/VERSION" ] && cur="$(cat "$BASE/VERSION")"
   echo "    当前: $cur"
   latest="$(curl -fsSL --connect-timeout 12 $(proxy_args "$MAIN_ENV") \
-    "https://api.github.com/repos/wazakid/unmi_TGtool/releases/latest" 2>/dev/null \
+    "https://api.github.com/repos/unmime/unmi_TGtool/releases/latest" 2>/dev/null \
     | grep -oE '"tag_name":[[:space:]]*"[^"]+"' | head -1 | cut -d'"' -f4)"
   [ -z "$latest" ] && { err "获取最新版本失败（网络问题）"; return; }
   echo "    最新: $latest"
@@ -553,7 +553,7 @@ do_update_all() {
   local tmp; tmp="$(mktemp -d)"
   echo "    下载中…"
   curl -fsSL --connect-timeout 20 $(proxy_args "$MAIN_ENV") \
-    "https://github.com/wazakid/unmi_TGtool/releases/download/${latest}/unmi_TGtool.tar.gz" \
+    "https://github.com/unmime/unmi_TGtool/releases/download/${latest}/unmi_TGtool.tar.gz" \
     -o "$tmp/p.tgz" 2>/dev/null || { err "下载失败"; rm -rf "$tmp"; return; }
   # 解压必须先成功：脚本无 set -e，解压失败若继续会删掉各实例的 core/modules 却复制不上新文件
   tar xzf "$tmp/p.tgz" -C "$tmp" || { err "解压失败（安装包损坏），未改动任何文件"; rm -rf "$tmp"; return; }

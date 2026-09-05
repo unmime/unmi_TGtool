@@ -13,7 +13,7 @@ Run this **single command** as `root` — it downloads, installs and configures 
 then it's ready to use:
 
 ```bash
-bash <(curl -sL https://raw.githubusercontent.com/wazakid/unmi_TGtool/main/unmi.sh)
+bash <(curl -sL https://raw.githubusercontent.com/unmime/unmi_TGtool/main/unmi.sh)
 ```
 
 You'll be prompted for your **Bot Token** and **Chat ID** (create a bot with @BotFather for the
@@ -28,8 +28,8 @@ The result comes in two independently click-to-copy blocks.
 
 ```bash
 # 1) Download (pick one)
-wget https://github.com/wazakid/unmi_TGtool/releases/latest/download/unmi_TGtool.tar.gz
-# or: curl -LO https://github.com/wazakid/unmi_TGtool/releases/latest/download/unmi_TGtool.tar.gz
+wget https://github.com/unmime/unmi_TGtool/releases/latest/download/unmi_TGtool.tar.gz
+# or: curl -LO https://github.com/unmime/unmi_TGtool/releases/latest/download/unmi_TGtool.tar.gz
 
 # 2) Extract & install (tarball has a top-level unmi_TGtool/ dir)
 tar xzf unmi_TGtool.tar.gz && cd unmi_TGtool
