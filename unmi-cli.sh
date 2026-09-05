@@ -356,7 +356,9 @@ inst_update() {
     "https://github.com/wazakid/unmi_TGtool/releases/download/${latest}/unmi_TGtool.tar.gz" \
     -o "$tmp/p.tgz" 2>/dev/null || { err "下载失败"; rm -rf "$tmp"; return; }
   cp -r "$CUR_DIR/data" "$tmp/dbak" 2>/dev/null || true
-  tar xzf "$tmp/p.tgz" -C "$tmp"
+  # 解压必须先成功：脚本无 set -e，解压失败若继续会删掉 core/modules 却复制不上新文件
+  tar xzf "$tmp/p.tgz" -C "$tmp" || { err "解压失败（安装包损坏），未改动任何文件"; rm -rf "$tmp"; return; }
+  [ -d "$tmp/unmi_TGtool/core" ] || { err "安装包结构异常，未改动任何文件"; rm -rf "$tmp"; return; }
   rm -rf "$CUR_DIR/core" "$CUR_DIR/modules"
   cp -r "$tmp/unmi_TGtool/core" "$tmp/unmi_TGtool/modules" "$CUR_DIR/"
   cp "$tmp/unmi_TGtool/main.py" "$tmp/unmi_TGtool/TGcalc_bot.py" "$CUR_DIR/"
@@ -505,7 +507,9 @@ do_update_all() {
   curl -fsSL --connect-timeout 20 $(proxy_args "$MAIN_ENV") \
     "https://github.com/wazakid/unmi_TGtool/releases/download/${latest}/unmi_TGtool.tar.gz" \
     -o "$tmp/p.tgz" 2>/dev/null || { err "下载失败"; rm -rf "$tmp"; return; }
-  tar xzf "$tmp/p.tgz" -C "$tmp"
+  # 解压必须先成功：脚本无 set -e，解压失败若继续会删掉各实例的 core/modules 却复制不上新文件
+  tar xzf "$tmp/p.tgz" -C "$tmp" || { err "解压失败（安装包损坏），未改动任何文件"; rm -rf "$tmp"; return; }
+  [ -d "$tmp/unmi_TGtool/core" ] || { err "安装包结构异常，未改动任何文件"; rm -rf "$tmp"; return; }
 
   # 更新框架 + 每个实例目录的代码（保留各自 data 与 env）
   local d
