@@ -18,7 +18,7 @@
 set -euo pipefail
 
 # ---- 常量 ----
-VERSION="v3.0.3"
+VERSION="v3.1.0"
 REPO="wazakid/unmi_TGtool"
 TAR_URL="https://github.com/${REPO}/releases/download/${VERSION}/unmi_TGtool.tar.gz"
 APP_DIR="/opt/unmi_TGtool"
@@ -101,6 +101,40 @@ install_cli() {
   ok "以后敲 ${C_BOLD}unmi${C_RESET} 打开控制台"
 }
 
+# ---- 安装时检测网络，连不上 Telegram 就配代理（写全局，所有机器人共用）----
+detect_proxy() {
+  step "网络连通性检查"
+  mkdir -p "$APP_DIR/data"
+  if curl -fsSL --connect-timeout 6 -o /dev/null https://api.telegram.org 2>/dev/null; then
+    ok "可以直连 Telegram"
+    printf '' > "$APP_DIR/data/proxy.conf"
+    return
+  fi
+  warn "连不上 api.telegram.org（国内服务器需要代理才能用 Telegram）"
+  local p r
+  while :; do
+    printf "  ${C_BOLD}代理地址${C_RESET}（如 http://127.0.0.1:7890）: " > /dev/tty
+    read -r p < /dev/tty
+    if [ -z "$p" ]; then
+      warn "连不上 Telegram 时必须配代理，否则机器人无法收发消息"
+      continue
+    fi
+    if curl -fsSL --connect-timeout 8 -x "$p" -o /dev/null https://api.telegram.org 2>/dev/null; then
+      ok "走代理 $p 可连通 Telegram"
+      printf '%s' "$p" > "$APP_DIR/data/proxy.conf"
+      return
+    fi
+    warn "走 $p 也连不通 Telegram"
+    printf "  重新输入代理？[y/N] " > /dev/tty
+    read -r r < /dev/tty
+    if [ "$r" != "y" ]; then
+      warn "暂未配置代理（可稍后敲 unmi → p 配置全局代理）"
+      printf '' > "$APP_DIR/data/proxy.conf"
+      return
+    fi
+  done
+}
+
 # ---- 引导添加第一个机器人 ----
 first_bot() {
   echo
@@ -126,6 +160,7 @@ main() {
   check_env
   download
   install_cli
+  detect_proxy
   first_bot
 }
 

@@ -54,6 +54,12 @@ get_val() { grep -E "^$2=" "$1" 2>/dev/null | head -1 | cut -d= -f2-; }
 # 该 env 生效的代理（拼成 curl 参数）
 proxy_args() { local p; p="$(get_val "$1" https_proxy)"; [ -n "$p" ] && printf -- '-x %s' "$p" || printf ''; }
 
+# 全局代理（安装时配一次，所有机器人共用）。存 $BASE/data/proxy.conf
+PROXY_CONF="$BASE/data/proxy.conf"
+global_proxy() { cat "$PROXY_CONF" 2>/dev/null; }
+# 供 curl 用（展开成 -x 参数或空）
+global_proxy_args() { local p; p="$(global_proxy)"; [ -n "$p" ] && printf -- '-x %s' "$p" || printf ''; }
+
 svc_state() {
   if systemctl is-active --quiet "$1" 2>/dev/null; then
     echo -e "${C_GREEN}运行中${C_RESET}"
@@ -102,9 +108,11 @@ display_name() {  # $1=name $2=dir $3=env
 #===============================================================================
 
 add_bot() {
-  echo -e "${C_BOLD}  添加机器人${C_RESET}"
-  echo -e "  ${C_DIM}去 @BotFather 建 bot 拿 token；先给 bot 发条消息，再拿你的 chat id${C_RESET}"
   echo
+  divider
+  echo -e "${C_BOLD}  添加机器人${C_RESET}  ${C_DIM}（共 3 步：Token → Chat ID → 备注）${C_RESET}"
+  divider
+  echo -e "${C_CYAN}${C_BOLD}【第 1 步】Bot Token${C_RESET} ${C_DIM}（去 @BotFather 建 bot 拿；先给 bot 发条消息）${C_RESET}"
 
   local token
   while :; do
@@ -123,16 +131,10 @@ add_bot() {
     fi
   done
 
-  # 代理（国内连不上时需要）
-  local proxy=""
-  if ! curl -fsSL --connect-timeout 6 -o /dev/null https://api.telegram.org 2>/dev/null; then
-    warn "直连 Telegram 不通（国内服务器需要代理）"
-    printf "  ${C_BOLD}代理地址${C_RESET}（如 http://127.0.0.1:7890，留空跳过）: "; read -r proxy
-  fi
-
-  # 自动识别 bot 名
-  echo -e "  ${C_DIM}正在识别机器人…${C_RESET}"
-  local px=""; [ -n "$proxy" ] && px="-x $proxy"
+  # 识别 bot 名（用安装时已配好的全局代理，这里不再询问）
+  local proxy px; proxy="$(global_proxy)"; px=""
+  [ -n "$proxy" ] && px="-x $proxy"
+  echo -e "  ${C_DIM}正在识别机器人…$( [ -n "$proxy" ] && echo "（走全局代理）" )${C_RESET}"
   local me un fname
   me="$(curl -fsSL --connect-timeout 12 $px "https://api.telegram.org/bot${token}/getMe" 2>/dev/null)"
   un="$(printf '%s' "$me" | grep -oE '"username":"[^"]+"' | head -1 | cut -d'"' -f4)"
@@ -140,13 +142,23 @@ add_bot() {
   if [ -n "$un" ]; then
     ok "识别到机器人：${C_BOLD}@${un}${C_RESET}（${fname}）"
   else
-    warn "没能识别（token 可能不对，或网络不通）"
+    warn "没能识别（token 可能不对，或网络/代理不通）"
     printf "  仍要继续添加？[y/N] "; read -r c; [ "$c" = "y" ] || return
   fi
 
-  # 自定义名字（用于管理显示 + 目录/服务名）
+  divider
+  echo -e "${C_CYAN}${C_BOLD}【第 2 步】Chat ID${C_RESET} ${C_DIM}（你的 Telegram 用户 ID，纯数字；必填，不可跳过）${C_RESET}"
+  local chat
+  while :; do
+    printf "  ${C_BOLD}Chat ID${C_RESET}（纯数字）: "; read -r chat
+    printf '%s' "$chat" | grep -qE '^-?[0-9]+$' && break
+    warn "chat id 必须是数字，重新输入"
+  done
+
+  divider
+  echo -e "${C_CYAN}${C_BOLD}【第 3 步】备注${C_RESET} ${C_DIM}（给机器人起个好认的名字，用于面板显示）${C_RESET}"
   local label slug
-  printf "  ${C_BOLD}给它起个名字${C_RESET}（用于管理，默认 @%s）: " "${un:-bot}"; read -r label
+  printf "  ${C_BOLD}备注名${C_RESET}（默认 @%s）: " "${un:-bot}"; read -r label
   [ -z "$label" ] && label="${un:-bot}"
   slug="$(printf '%s' "$label" | tr -cd 'A-Za-z0-9_-' | tr 'A-Z' 'a-z')"
   [ -z "$slug" ] && slug="$(printf '%s' "$un" | tr -cd 'A-Za-z0-9_-' | tr 'A-Z' 'a-z')"
@@ -164,14 +176,8 @@ add_bot() {
     printf "  覆盖重装？[y/N] "; read -r c; [ "$c" = "y" ] || return
   fi
 
-  local chat
-  while :; do
-    printf "  ${C_BOLD}Chat ID${C_RESET}（纯数字）: "; read -r chat
-    printf '%s' "$chat" | grep -qE '^-?[0-9]+$' && break
-    warn "chat id 必须是数字，重新输入"
-  done
-
   # 落地：复制程序、写 env、建服务、启动
+  divider
   echo -e "  ${C_DIM}创建实例 $slug …${C_RESET}"
   if [ "$dir" != "$BASE" ]; then
     mkdir -p "$dir"
@@ -224,7 +230,14 @@ EOF
     || warn "测试消息没发出去（可进该机器人选「发送测试」重试）"
 
   echo
-  ok "机器人「$label」添加完成，发 66*98 就能用"
+  divider
+  echo -e "${C_GREEN}${C_BOLD}  ✅ 添加完成 · 配置摘要${C_RESET}"
+  echo    "    机器人:  ${un:+@$un }（$label）"
+  echo    "    Chat ID: $chat"
+  echo    "    代理:    ${proxy:-直连}"
+  echo    "    实例:    $slug（服务 $svc）"
+  divider
+  echo -e "  去 Telegram 给 ${C_BOLD}${un:+@$un}${C_RESET} 发 ${C_CYAN}66*98${C_RESET} 就能用"
 }
 
 #===============================================================================
@@ -479,13 +492,48 @@ do_send_test() {
   fi
 }
 
-# 主页：配置代理（选一个机器人来配）
-do_proxy_pick() {
-  echo -e "${C_BOLD}  配置代理${C_RESET}（选一个机器人；代理是按机器人各自独立的）"
-  _pick_bot || return
-  IFS='|' read -r n d e s <<< "$PICKED"
-  set_current "$n"
-  inst_proxy
+# 主页：配置全局代理（一次配置，所有机器人共用，并同步重启）
+do_proxy_global() {
+  echo -e "${C_BOLD}  配置全局代理${C_RESET} ${C_DIM}（所有机器人共用；安装时已配的话这里可改）${C_RESET}"
+  local cur; cur="$(global_proxy)"
+  [ -n "$cur" ] && echo "  当前代理: $cur" || echo "  当前代理: 直连（未配置）"
+  # 连通性检测
+  if curl -fsSL --connect-timeout 6 -o /dev/null https://api.telegram.org 2>/dev/null; then
+    ok "当前可直连 Telegram"
+  else
+    warn "直连 Telegram 不通（国内服务器需要代理）"
+  fi
+  echo -e "  ${C_DIM}（输入 0 返回）${C_RESET}"
+  local p
+  printf "  ${C_BOLD}代理地址${C_RESET}（如 http://127.0.0.1:7890，留空=直连）: "; read -r p
+  [ "$p" = "0" ] && return
+  # 验证代理可达
+  if [ -n "$p" ]; then
+    if curl -fsSL --connect-timeout 8 -x "$p" -o /dev/null https://api.telegram.org 2>/dev/null; then
+      ok "走 $p 可连通 Telegram"
+    else
+      warn "走 $p 连不通 Telegram，请确认代理可用（仍可保存，稍后重试）"
+    fi
+  fi
+  # 写全局文件
+  mkdir -p "$BASE/data"
+  printf '%s' "$p" > "$PROXY_CONF"
+  ok "全局代理已保存：${p:-直连}"
+  # 同步到每个机器人的 env 并重启
+  local name dir env svc
+  while IFS='|' read -r name dir env svc; do
+    [ -f "$env" ] || continue
+    if [ -n "$p" ]; then
+      if grep -q '^https_proxy=' "$env" 2>/dev/null; then
+        sed -i "s|^https_proxy=.*|https_proxy=$p|" "$env"
+      else
+        echo "https_proxy=$p" >> "$env"
+      fi
+    else
+      sed -i '/^https_proxy=/d' "$env" 2>/dev/null
+    fi
+    systemctl restart "$svc" 2>/dev/null && ok "已同步并重启：$(display_name "$name" "$dir" "$env")"
+  done <<< "$(list_instances)"
 }
 
 # 主页：一键更新（更新框架 + 所有机器人 + unmi 命令，重启全部）
@@ -606,7 +654,7 @@ EOF
   case "$n" in
     a|A) add_bot; printf "  ${C_DIM}按回车继续…${C_RESET}"; read -r _ ;;
     t|T) do_send_test; printf "  ${C_DIM}按回车继续…${C_RESET}"; read -r _ ;;
-    p|P) do_proxy_pick; printf "  ${C_DIM}按回车继续…${C_RESET}"; read -r _ ;;
+    p|P) do_proxy_global; printf "  ${C_DIM}按回车继续…${C_RESET}"; read -r _ ;;
     u|U) do_update_all; printf "  ${C_DIM}按回车继续…${C_RESET}"; read -r _ ;;
     x|X) do_uninstall_panel ;;
     0|q) echo "  再见"; exit 0 ;;
