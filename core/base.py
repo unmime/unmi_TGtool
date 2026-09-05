@@ -27,6 +27,8 @@ class Module(object):
     name = ""                 # 模块唯一标识（用于日志、配置）
     version = "0.0.0"
     description = ""
+    commands = []             # 该模块贡献给 bot 菜单的命令，形如 [{"command": "calc", "description": "🧮 计算器"}]
+                              # 主程序启动时汇总所有 enabled 模块的 commands 注册到 Telegram（setMyCommands 是全量覆盖）
 
     def __init__(self, ctx):
         """ctx 是 BotContext（见 core/tg.py），提供 Telegram API、配置、日志。"""

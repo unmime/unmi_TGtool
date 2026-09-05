@@ -217,14 +217,16 @@ def main():
         return 0
 
     _ctx, _mods, disp = build(cfg)
-    # 注意：与 CrowdSec relay 共用同一 bot token，setMyCommands 是全量覆盖，
-    # 这里必须注册完整命令列表，否则会把 /crowdsec、/qinglong 顶掉。
+    # 命令菜单由已启用模块自己声明（Module.commands），主程序只负责汇总。
+    # setMyCommands 是全量覆盖，绝不能在这里硬编码部分命令——
+    # 否则会把别的模块的命令（如 /crowdsec、/qinglong）从菜单顶掉。
+    cmds = []
+    for m in _mods:
+        cmds.extend(getattr(m, "commands", None) or [])
+    cmds.append({"command": "help", "description": "❓ 使用说明"})
     _ctx.setup_commands(
-        [{"command": "crowdsec", "description": "🛡 CrowdSec 安全守护"},
-         {"command": "qinglong", "description": "🐉 青龙面板"},
-         {"command": "calc", "description": "🧮 计算器设置"},
-         {"command": "help", "description": "❓ 使用说明"}],
-        "服务器安全守护（CrowdSec 集群）、青龙面板与自动化通知。/crowdsec 主菜单，直接发算式就能算。")
+        cmds,
+        "unmi_TGtool 工具集：/help 查看全部命令与使用说明。")
     threading.Thread(target=poll_loop, args=(disp,), daemon=True).start()
     while True:
         time.sleep(3600)

@@ -25,6 +25,7 @@ class Plugin(Module):
     name = "calc"
     version = "1.1.0"
     description = "计算器（AST 白名单求值 + 中文读法 + 会计大写）"
+    commands = [{"command": "calc", "description": "🧮 计算器设置"}]
 
     def on_start(self):
         # 启动时预热一次设置，顺带把 settings 文件建出来

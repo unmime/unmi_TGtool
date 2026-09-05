@@ -29,6 +29,9 @@ ok()   { echo -e "${C_GREEN}  [✓]${C_RESET} $*"; }
 warn() { echo -e "${C_YELLOW}  [!]${C_RESET} $*"; }
 err()  { echo -e "${C_RED}  [✗]${C_RESET} $*"; }
 
+# 分割线（贴合主题的暗青色，区分每一屏/每次操作）
+divider() { echo -e "${C_DIM}${C_CYAN}  ──────────────────────────────────────────${C_RESET}"; }
+
 #===============================================================================
 # 实例发现与信息
 #===============================================================================
@@ -243,18 +246,47 @@ inst_status() {
   [ -n "$p" ] && echo "  代理:   $p" || echo "  代理:   未配置（直连）"
 }
 
+# 统一写 env：读出现有全部字段，用传入的 k=v 覆盖指定项后写回。
+# 这样每个功能只改自己那项，不会丢掉备注/代理等其它字段。
+save_env() {  # 用法: save_env KEY=VAL [KEY=VAL ...]（作用于当前实例 $CUR_ENV）
+  local token chat dd proxy label note
+  token="$(cval TG_BOT_TOKEN)"; chat="$(cval TG_CHAT_ID)"
+  dd="$(cval DATA_DIR)"; [ -z "$dd" ] && dd="$CUR_DIR/data"
+  proxy="$(cval https_proxy)"; label="$(cval INSTANCE_LABEL)"; note="$(cval INSTANCE_NOTE)"
+  local kv k v
+  for kv in "$@"; do
+    k="${kv%%=*}"; v="${kv#*=}"
+    case "$k" in
+      TG_BOT_TOKEN)   token="$v";;
+      TG_CHAT_ID)     chat="$v";;
+      DATA_DIR)       dd="$v";;
+      https_proxy)    proxy="$v";;
+      INSTANCE_LABEL) label="$v";;
+      INSTANCE_NOTE)  note="$v";;
+    esac
+  done
+  umask 077
+  {
+    [ -n "$token" ] && echo "TG_BOT_TOKEN=$token"
+    [ -n "$chat" ] && echo "TG_CHAT_ID=$chat"
+    echo "DATA_DIR=$dd"
+    [ -n "$label" ] && echo "INSTANCE_LABEL=$label"
+    [ -n "$note" ] && echo "INSTANCE_NOTE=$note"
+    [ -n "$proxy" ] && echo "https_proxy=$proxy"
+  } > "$CUR_ENV"
+  chmod 600 "$CUR_ENV"
+}
+
 inst_config() {
-  local token chat dd proxy label
+  local token chat
+  echo -e "  ${C_DIM}（随时输入 0 返回菜单）${C_RESET}"
   printf "  Bot Token: "; read -r token
+  [ "$token" = "0" ] && return
   printf '%s' "$token" | grep -qE '^[0-9]+:[A-Za-z0-9_-]{20,}$' || { err "格式不对"; return; }
   printf "  Chat ID: "; read -r chat
+  [ "$chat" = "0" ] && return
   printf '%s' "$chat" | grep -qE '^-?[0-9]+$' || { err "必须是数字"; return; }
-  dd="$(cval DATA_DIR)"; [ -z "$dd" ] && dd="$CUR_DIR/data"
-  proxy="$(cval https_proxy)"; label="$(cval INSTANCE_LABEL)"
-  umask 077
-  { echo "TG_BOT_TOKEN=$token"; echo "TG_CHAT_ID=$chat"; echo "DATA_DIR=$dd"
-    [ -n "$label" ] && echo "INSTANCE_LABEL=$label"; [ -n "$proxy" ] && echo "https_proxy=$proxy"; } > "$CUR_ENV"
-  chmod 600 "$CUR_ENV"
+  save_env TG_BOT_TOKEN="$token" TG_CHAT_ID="$chat"
   rm -f "$CUR_DIR/data/botinfo"
   systemctl restart "$CUR_SVC" && ok "已保存并重启"
 }
@@ -273,16 +305,24 @@ inst_test() {
 
 inst_proxy() {
   local p; p="$(cval https_proxy)"; [ -n "$p" ] && echo "  当前：$p"
+  echo -e "  ${C_DIM}（输入 0 返回菜单）${C_RESET}"
   printf "  代理地址（留空清除）: "; read -r p
-  local token chat dd label; token="$(cval TG_BOT_TOKEN)"; chat="$(cval TG_CHAT_ID)"
-  dd="$(cval DATA_DIR)"; [ -z "$dd" ] && dd="$CUR_DIR/data"; label="$(cval INSTANCE_LABEL)"
-  umask 077
-  { [ -n "$token" ] && echo "TG_BOT_TOKEN=$token"; [ -n "$chat" ] && echo "TG_CHAT_ID=$chat"
-    echo "DATA_DIR=$dd"; [ -n "$label" ] && echo "INSTANCE_LABEL=$label"
-    [ -n "$p" ] && echo "https_proxy=$p"; } > "$CUR_ENV"
-  chmod 600 "$CUR_ENV"
+  [ "$p" = "0" ] && return
+  save_env https_proxy="$p"
   [ -n "$p" ] && ok "代理已设为 $p" || ok "已清除代理"
   systemctl restart "$CUR_SVC" >/dev/null 2>&1 && ok "已重启生效"
+}
+
+# 添加/修改备注（存在 env 的 INSTANCE_NOTE，标题栏显示）
+inst_note() {
+  local cur; cur="$(cval INSTANCE_NOTE)"
+  [ -n "$cur" ] && echo "  当前备注：$cur"
+  echo -e "  ${C_DIM}（输入 0 返回菜单）${C_RESET}"
+  printf "  备注（留空清除）: "; read -r cur
+  [ "$cur" = "0" ] && return
+  save_env INSTANCE_NOTE="$cur"
+  CUR_NOTE="$cur"
+  [ -n "$cur" ] && ok "备注已保存：$cur" || ok "备注已清除"
 }
 
 inst_log()     { journalctl -u "$CUR_SVC" -n 30 --no-pager; }
@@ -297,7 +337,9 @@ inst_update() {
   [ -z "$latest" ] && { err "获取最新版本失败（网络问题）"; return; }
   echo "    最新: $latest"
   [ "$cur" = "$latest" ] && { ok "已是最新"; return; }
-  printf "    更新到 %s？[y/N] " "$latest"; read -r a; [ "$a" = "y" ] || { warn "已取消"; return; }
+  echo
+  printf "    ${C_BOLD}是否更新到 %s？${C_RESET} [y] 更新  [0/其它] 返回: " "$latest"
+  read -r a; [ "$a" = "y" ] || { warn "已取消"; return; }
   local tmp; tmp="$(mktemp -d)"
   curl -fsSL --connect-timeout 20 $(cproxy) \
     "https://github.com/wazakid/unmi_TGtool/releases/download/${latest}/unmi_TGtool.tar.gz" \
@@ -315,29 +357,44 @@ inst_update() {
 }
 
 inst_uninstall() {
-  echo -e "  ${C_RED}卸载机器人「$CUR_LABEL」（实例 $CUR_NAME）${C_RESET}"
+  # 只删除当前这个机器人（它的配置/服务/目录），不动控制台本身和其它机器人
+  echo -e "  ${C_RED}删除机器人「$CUR_LABEL」（实例 $CUR_NAME）${C_RESET}"
   echo "    将删除：$CUR_ENV、服务 $CUR_SVC$( [ "$CUR_NAME" != "main" ] && echo "、$CUR_DIR" )"
-  printf "    确认？输入 yes: "; read -r a; [ "$a" = "yes" ] || { warn "已取消"; return; }
+  echo -e "    ${C_DIM}控制台和其它机器人不受影响${C_RESET}"
+  echo
+  printf "    ${C_BOLD}是否删除？${C_RESET} [y] 删除  [0/其它] 取消: "; read -r a
+  [ "$a" = "y" ] || { warn "已取消"; return; }
   systemctl stop "$CUR_SVC" 2>/dev/null; systemctl disable "$CUR_SVC" 2>/dev/null
   rm -f "/etc/systemd/system/$CUR_SVC.service" "$CUR_ENV"
-  [ "$CUR_NAME" != "main" ] && rm -rf "$CUR_DIR" || warn "主实例目录保留（其他实例可能共享其代码）"
+  [ "$CUR_NAME" != "main" ] && rm -rf "$CUR_DIR" || warn "主实例目录保留（其它实例可能共享其代码）"
   systemctl daemon-reload
-  ok "已卸载「$CUR_LABEL」"
+  ok "已删除「$CUR_LABEL」"
   return 9
 }
 
 inst_menu() {
+  local n _note
   while :; do
+    _note="$(cval INSTANCE_NOTE)"
     echo
-    echo -e "${C_BOLD}  🤖 $CUR_LABEL${C_RESET} ${C_DIM}（$CUR_SVC · $(systemctl is-active "$CUR_SVC" 2>/dev/null)）${C_RESET}"
+    divider
+    if [ -n "$_note" ]; then
+      echo -e "${C_BOLD}  🤖 $CUR_LABEL${C_RESET} ${C_DIM}（$_note）${C_RESET}"
+    else
+      echo -e "${C_BOLD}  🤖 $CUR_LABEL${C_RESET}"
+    fi
+    echo -e "  ${C_DIM}$CUR_SVC · $(systemctl is-active "$CUR_SVC" 2>/dev/null)${C_RESET}"
+    divider
     echo -e "  ${C_CYAN}1${C_RESET}) 查看状态      ${C_CYAN}2${C_RESET}) 配置机器人    ${C_CYAN}3${C_RESET}) 发送测试"
     echo -e "  ${C_CYAN}4${C_RESET}) 配置代理      ${C_CYAN}5${C_RESET}) 查看日志      ${C_CYAN}6${C_RESET}) 重启服务"
-    echo -e "  ${C_CYAN}7${C_RESET}) 一键更新      ${C_CYAN}8${C_RESET}) 卸载此机器人  ${C_CYAN}0${C_RESET}) 返回"
+    echo -e "  ${C_CYAN}7${C_RESET}) 一键更新      ${C_CYAN}8${C_RESET}) 添加备注      ${C_CYAN}9${C_RESET}) 删除此机器人"
+    echo -e "  ${C_CYAN}0${C_RESET}) 返回面板"
+    divider
     printf "  选择: "; read -r n
     case "$n" in
       1) inst_status ;; 2) inst_config ;; 3) inst_test ;; 4) inst_proxy ;;
-      5) inst_log ;;   6) inst_restart ;; 7) inst_update ;;
-      8) inst_uninstall; [ $? = 9 ] && return ;;
+      5) inst_log ;;   6) inst_restart ;; 7) inst_update ;; 8) inst_note ;;
+      9) inst_uninstall; [ $? = 9 ] && return ;;
       0|q) return ;;
       *) warn "无效" ;;
     esac
@@ -374,14 +431,16 @@ main_menu() {
     echo -e "  ${C_DIM}还没有任何机器人。${C_RESET}"
   else
     echo -e "  ${C_BOLD}已装机器人：${C_RESET}"
+    divider
     while IFS='|' read -r name dir env svc; do
       i=$((i+1)); NAMES+=("$name")
       label="$(display_name "$name" "$dir" "$env")"
       state="$(svc_state "$svc")"
-      printf "   ${C_CYAN}%d${C_RESET}) %-28s %s\n" "$i" "$label" "$state"
+      printf "   ${C_CYAN}「%d」${C_RESET} %-28s %s\n" "$i" "$label" "$state"
     done <<EOF
 $(list_instances)
 EOF
+    divider
   fi
   echo
   echo -e "  ${C_CYAN}a${C_RESET}) 添加机器人    ${C_CYAN}0${C_RESET}) 退出"
