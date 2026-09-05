@@ -18,7 +18,7 @@
 set -euo pipefail
 
 # ---- 常量 ----
-VERSION="v3.0.1"
+VERSION="v3.0.2"
 REPO="wazakid/unmi_TGtool"
 TAR_URL="https://github.com/${REPO}/releases/download/${VERSION}/unmi_TGtool.tar.gz"
 APP_DIR="/opt/unmi_TGtool"

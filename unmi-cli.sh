@@ -22,8 +22,9 @@ if [ -t 1 ]; then
   C_RESET=$'\033[0m'; C_BOLD=$'\033[1m'; C_DIM=$'\033[2m'
   C_CYAN=$'\033[36m'; C_GREEN=$'\033[32m'; C_YELLOW=$'\033[33m'
   C_RED=$'\033[31m'; C_PURPLE=$'\033[35m'; C_BLUE=$'\033[34m'
+  C_PINK=$'\033[38;5;217m'   # 淡粉（备注用）
 else
-  C_RESET=""; C_BOLD=""; C_DIM=""; C_CYAN=""; C_GREEN=""; C_YELLOW=""; C_RED=""; C_PURPLE=""; C_BLUE=""
+  C_RESET=""; C_BOLD=""; C_DIM=""; C_CYAN=""; C_GREEN=""; C_YELLOW=""; C_RED=""; C_PURPLE=""; C_BLUE=""; C_PINK=""
 fi
 ok()   { echo -e "${C_GREEN}  [✓]${C_RESET} $*"; }
 warn() { echo -e "${C_YELLOW}  [!]${C_RESET} $*"; }
@@ -37,8 +38,9 @@ divider() { echo -e "${C_DIM}${C_CYAN}  ─────────────�
 #===============================================================================
 
 # 输出每个实例一行：name|dir|env|service
+# main 必须有配置文件才算实例（删除后代码目录还在，但没有 env 就不该再列出来）
 list_instances() {
-  [ -d "$BASE" ] && printf 'main|%s|%s|%s\n' "$BASE" "$MAIN_ENV" "$MAIN_SERVICE"
+  [ -d "$BASE" ] && [ -f "$MAIN_ENV" ] && printf 'main|%s|%s|%s\n' "$BASE" "$MAIN_ENV" "$MAIN_SERVICE"
   local d n
   for d in "$BASE"-*/; do
     [ -d "$d" ] || continue
@@ -57,6 +59,15 @@ svc_state() {
     echo -e "${C_GREEN}运行中${C_RESET}"
   else
     echo -e "${C_RED}停止${C_RESET}"
+  fi
+}
+
+# 实例标题里的 active/inactive（active 绿、inactive 红）
+state_text() {
+  if systemctl is-active --quiet "$1" 2>/dev/null; then
+    echo -e "${C_GREEN}active${C_RESET}"
+  else
+    echo -e "${C_RED}inactive${C_RESET}"
   fi
 }
 
@@ -379,28 +390,165 @@ inst_menu() {
     echo
     divider
     if [ -n "$_note" ]; then
-      echo -e "${C_BOLD}  🤖 $CUR_LABEL${C_RESET} ${C_DIM}（$_note）${C_RESET}"
+      echo -e "${C_BOLD}  🤖 $CUR_LABEL${C_RESET} ${C_PINK}（$_note）${C_RESET}"
     else
       echo -e "${C_BOLD}  🤖 $CUR_LABEL${C_RESET}"
     fi
-    echo -e "  ${C_DIM}$CUR_SVC · $(systemctl is-active "$CUR_SVC" 2>/dev/null)${C_RESET}"
+    echo -e "  ${C_DIM}$CUR_SVC · $(state_text "$CUR_SVC")${C_RESET}"
     divider
-    echo -e "  ${C_CYAN}1${C_RESET}) 查看状态      ${C_CYAN}2${C_RESET}) 配置机器人    ${C_CYAN}3${C_RESET}) 发送测试"
-    echo -e "  ${C_CYAN}4${C_RESET}) 配置代理      ${C_CYAN}5${C_RESET}) 查看日志      ${C_CYAN}6${C_RESET}) 重启服务"
-    echo -e "  ${C_CYAN}7${C_RESET}) 一键更新      ${C_CYAN}8${C_RESET}) 添加备注      ${C_CYAN}9${C_RESET}) 删除此机器人"
+    echo -e "  ${C_CYAN}1${C_RESET}) 查看状态      ${C_CYAN}2${C_RESET}) 配置机器人    ${C_CYAN}3${C_RESET}) 添加备注"
+    echo -e "  ${C_CYAN}4${C_RESET}) 查看日志      ${C_CYAN}5${C_RESET}) 重启服务      ${C_CYAN}6${C_RESET}) 删除此机器人"
     echo -e "  ${C_CYAN}0${C_RESET}) 返回面板"
     divider
     printf "  选择: "; read -r n
     case "$n" in
-      1) inst_status ;; 2) inst_config ;; 3) inst_test ;; 4) inst_proxy ;;
-      5) inst_log ;;   6) inst_restart ;; 7) inst_update ;; 8) inst_note ;;
-      9) inst_uninstall; [ $? = 9 ] && return ;;
+      1) inst_status ;; 2) inst_config ;; 3) inst_note ;;
+      4) inst_log ;;   5) inst_restart ;;
+      6) inst_uninstall; [ $? = 9 ] && return ;;
       0|q) return ;;
       *) warn "无效" ;;
     esac
     # 每个操作完成后暂停，让用户看到结果（否则新菜单会把反馈顶出屏幕）
     printf "  ${C_DIM}按回车继续…${C_RESET}"; read -r _
   done
+}
+
+#===============================================================================
+# 主页功能：发送测试 / 配置代理 / 一键更新 / 卸载面板
+#===============================================================================
+
+# 给某个机器人发一条测试消息
+_send_one() {  # $1=name $2=dir $3=env
+  local token chat px resp label
+  token="$(get_val "$3" TG_BOT_TOKEN)"; chat="$(get_val "$3" TG_CHAT_ID)"
+  label="$(display_name "$1" "$2" "$3")"
+  if [ -z "$token" ] || [ -z "$chat" ]; then
+    err "「$label」未配置 token/chat_id"
+    return
+  fi
+  px="$(proxy_args "$3")"
+  resp="$(curl -fsSL --connect-timeout 12 $px -d "chat_id=$chat" \
+    --data-urlencode "text=🔔 「$label」测试消息：配置正确，工作正常！" \
+    -d "parse_mode=HTML" "https://api.telegram.org/bot${token}/sendMessage" 2>&1)"
+  printf '%s' "$resp" | grep -q '"ok":true' \
+    && ok "「$label」已发送" \
+    || { err "「$label」发送失败"; printf '%s' "$resp" | grep -oE '"description":"[^"]*"' | head -1 | sed 's/^/    /'; }
+}
+
+# 列出让用户选一个机器人，把选中的 name|dir|env|service 放进全局 PICKED
+# 返回 0=选好了，1=取消/无效。$1=额外选项提示（如 "a) 全部"），会设 PICKED=all
+_pick_bot() {
+  local extra="${1:-}"
+  local list; list="$(list_instances)"
+  [ -z "$list" ] && { warn "还没有机器人"; return 1; }
+  local i=0 name dir env svc label
+  PICK_LIST=()
+  while IFS='|' read -r name dir env svc; do
+    i=$((i+1)); PICK_LIST+=("$name|$dir|$env|$svc")
+    label="$(display_name "$name" "$dir" "$env")"
+    printf "   ${C_CYAN}「%d」${C_RESET} %s\n" "$i" "$label"
+  done <<< "$list"
+  [ -n "$extra" ] && echo -e "   ${C_CYAN}$extra${C_RESET}"
+  printf "  选择: "; read -r _pc
+  if [ -n "$extra" ] && { [ "$_pc" = "a" ] || [ "$_pc" = "A" ]; }; then
+    PICKED="all"; return 0
+  fi
+  case "$_pc" in
+    ''|*[!0-9]*) warn "无效"; return 1 ;;
+    *)
+      [ "$_pc" -ge 1 ] && [ "$_pc" -le "$i" ] || { warn "没有这个编号"; return 1; }
+      PICKED="${PICK_LIST[$((_pc-1))]}"; return 0 ;;
+  esac
+}
+
+# 主页：发送测试（选一个，或全部）
+do_send_test() {
+  echo -e "${C_BOLD}  发送测试${C_RESET}（选哪个机器人，或全部）"
+  _pick_bot "「a」全部发送" || return
+  if [ "$PICKED" = "all" ]; then
+    local entry
+    for entry in "${PICK_LIST[@]}"; do
+      IFS='|' read -r n d e s <<< "$entry"
+      _send_one "$n" "$d" "$e"
+    done
+  else
+    IFS='|' read -r n d e s <<< "$PICKED"
+    _send_one "$n" "$d" "$e"
+  fi
+}
+
+# 主页：配置代理（选一个机器人来配）
+do_proxy_pick() {
+  echo -e "${C_BOLD}  配置代理${C_RESET}（选一个机器人；代理是按机器人各自独立的）"
+  _pick_bot || return
+  IFS='|' read -r n d e s <<< "$PICKED"
+  set_current "$n"
+  inst_proxy
+}
+
+# 主页：一键更新（更新框架 + 所有机器人 + unmi 命令，重启全部）
+do_update_all() {
+  echo -e "${C_BOLD}  一键更新${C_RESET}"
+  local latest cur; cur="未知"; [ -f "$BASE/VERSION" ] && cur="$(cat "$BASE/VERSION")"
+  echo "    当前: $cur"
+  latest="$(curl -fsSL --connect-timeout 12 $(proxy_args "$MAIN_ENV") \
+    "https://api.github.com/repos/wazakid/unmi_TGtool/releases/latest" 2>/dev/null \
+    | grep -oE '"tag_name":[[:space:]]*"[^"]+"' | head -1 | cut -d'"' -f4)"
+  [ -z "$latest" ] && { err "获取最新版本失败（网络问题）"; return; }
+  echo "    最新: $latest"
+  [ "$cur" = "$latest" ] && { ok "已是最新"; return; }
+  printf "    ${C_BOLD}是否更新到 %s？${C_RESET} [y] 更新  [0/其它] 返回: " "$latest"
+  read -r a; [ "$a" = "y" ] || { warn "已取消"; return; }
+
+  local tmp; tmp="$(mktemp -d)"
+  echo "    下载中…"
+  curl -fsSL --connect-timeout 20 $(proxy_args "$MAIN_ENV") \
+    "https://github.com/wazakid/unmi_TGtool/releases/download/${latest}/unmi_TGtool.tar.gz" \
+    -o "$tmp/p.tgz" 2>/dev/null || { err "下载失败"; rm -rf "$tmp"; return; }
+  tar xzf "$tmp/p.tgz" -C "$tmp"
+
+  # 更新框架 + 每个实例目录的代码（保留各自 data 与 env）
+  local d
+  for d in "$BASE" "$BASE"-*/; do
+    [ -d "$d" ] || continue
+    cp -r "$d/data" "$tmp/dbak" 2>/dev/null || true
+    rm -rf "$d/core" "$d/modules"
+    cp -r "$tmp/unmi_TGtool/core" "$tmp/unmi_TGtool/modules" "$d/"
+    cp "$tmp/unmi_TGtool/main.py" "$tmp/unmi_TGtool/TGcalc_bot.py" "$d/"
+    mkdir -p "$d/data"; cp -r "$tmp/dbak/." "$d/data/" 2>/dev/null || true
+    echo "$latest" > "$d/VERSION"
+    rm -rf "$tmp/dbak"
+  done
+  [ -f "$tmp/unmi_TGtool/unmi-cli.sh" ] && install -m 755 "$tmp/unmi_TGtool/unmi-cli.sh" /usr/local/bin/unmi
+  rm -rf "$tmp"
+
+  # 重启所有实例服务
+  local name dir env svc
+  while IFS='|' read -r name dir env svc; do
+    systemctl restart "$svc" 2>/dev/null && ok "已更新并重启：$(display_name "$name" "$dir" "$env")"
+  done <<< "$(list_instances)"
+  ok "全部更新到 $latest"
+}
+
+# 主页：卸载整个面板（删除所有机器人 + 控制台本身）
+do_uninstall_panel() {
+  echo -e "${C_RED}${C_BOLD}  卸载整个 unmi_TGtool 面板${C_RESET}"
+  echo "    将删除：所有机器人（服务/配置/目录）、代码框架、unmi 命令"
+  echo
+  printf "    ${C_BOLD}确定要全部卸载？${C_RESET}输入 ${C_RED}yes${C_RESET} 确认: "; read -r a
+  [ "$a" = "yes" ] || { warn "已取消"; return; }
+  local name dir env svc
+  while IFS='|' read -r name dir env svc; do
+    systemctl stop "$svc" 2>/dev/null; systemctl disable "$svc" 2>/dev/null
+    rm -f "/etc/systemd/system/$svc.service" "$env"
+    ok "已删除：$(display_name "$name" "$dir" "$env")"
+  done <<< "$(list_instances)"
+  rm -rf "$BASE" "$BASE"-*/ 2>/dev/null
+  systemctl daemon-reload
+  echo
+  ok "已全部卸载，unmi 命令将于退出后移除"
+  (sleep 1; rm -f /usr/local/bin/unmi) &
+  exit 0
 }
 
 #===============================================================================
@@ -445,13 +593,18 @@ EOF
     divider
   fi
   echo
-  echo -e "  ${C_CYAN}a${C_RESET}) 添加机器人    ${C_CYAN}0${C_RESET}) 退出"
+  echo -e "  ${C_CYAN}a${C_RESET}) 添加机器人   ${C_CYAN}t${C_RESET}) 发送测试   ${C_CYAN}p${C_RESET}) 配置代理"
+  echo -e "  ${C_CYAN}u${C_RESET}) 一键更新     ${C_CYAN}x${C_RESET}) 卸载面板   ${C_CYAN}0${C_RESET}) 退出"
   echo
 
   local n
   printf "  选择（数字进入管理）: "; read -r n
   case "$n" in
     a|A) add_bot; printf "  ${C_DIM}按回车继续…${C_RESET}"; read -r _ ;;
+    t|T) do_send_test; printf "  ${C_DIM}按回车继续…${C_RESET}"; read -r _ ;;
+    p|P) do_proxy_pick; printf "  ${C_DIM}按回车继续…${C_RESET}"; read -r _ ;;
+    u|U) do_update_all; printf "  ${C_DIM}按回车继续…${C_RESET}"; read -r _ ;;
+    x|X) do_uninstall_panel ;;
     0|q) echo "  再见"; exit 0 ;;
     ''|*[!0-9]*) warn "无效选项" ;;
     *)
