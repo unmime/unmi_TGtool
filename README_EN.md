@@ -1,9 +1,10 @@
 # 🧰 unmi_TGtool — plug-and-play self-hosted Telegram tool kit
 
-> 中文版：[README.md](README.md)
+> 中文版：[README.md](README.md) · Current version **v1.0.0.0** (first stable release)
 
 **Zero dependencies** (Python standard library only). A pluggable Telegram tool-kit framework
-that **works as a calculator out of the box** — drop files into `modules/` to add features.
+that **works as a calculator out of the box** — drop files into `modules/` to add features,
+and manage every bot on the machine from one terminal dashboard with `unmi`.
 
 Runs on any Linux box with Python 3.6+. **One command, plug and play.**
 
@@ -16,13 +17,40 @@ then it's ready to use:
 bash <(curl -sL https://raw.githubusercontent.com/unmime/unmi_TGtool/main/unmi.sh)
 ```
 
-You'll be prompted for your **Bot Token** and **Chat ID** (create a bot with @BotFather for the
-token, message the bot first to get your chat id). After that it configures, starts and
-**sends a test message** to your Telegram.
+It drops you into the **console dashboard** (come back any time with `unmi`):
 
-Send `66*98` and get `66*98=6468｜6468｜` right away, plus the Chinese reading and the
-**official banking-style capitalized amount** used on Chinese invoices and cheques.
-The result comes in two independently click-to-copy blocks.
+```
+  unmi_TGtool 控制台  集中管理本机的 Telegram 机器人
+  https://github.com/unmime/unmi_TGtool   v1.0.0.0
+
+╔════════════════════════════════════════╗
+║ 已装机器人：                           ║
+║ 「1」 测试1 @unmiTGtool_bot  🟩 运行中 ║
+║ ══════════════════════════════════════ ║
+║ 「2」 测试2 @ceshi21212bot   🟩 运行中 ║
+║ ══════════════════════════════════════ ║
+╚════════════════════════════════════════╝
+
+  「A」 添加机器人   「T」 发送测试   「S」 开关机器人
+  「R」 重启服务     「P」 配置代理   「U」 一键更新
+  「X」 卸载面板     「0」 退出
+  ──────────────────────────────────────────
+  选择（数字进入管理）:
+```
+
+Press `A` for a 3-step wizard (Token → Chat ID → label); it configures, starts and sends a
+test message automatically. Press a number to open that bot's page
+(status / reconfigure / label / logs / delete / update).
+
+| Dashboard action | What it does |
+|---|---|
+| Add bot | Auto-detects the bot username, warns on duplicate names/tokens, lets you set a label |
+| Send test | Pick one or all, sends a test message to verify the config |
+| Toggle bot | Running → stop, stopped → start |
+| Restart | Restart one or all |
+| Set proxy | Global proxy shared by every bot, synced and restarted automatically |
+| One-click update | Pulls the latest release, updates framework + all bots + the `unmi` command, keeps configs |
+| Uninstall | Removes every bot plus the dashboard itself |
 
 ## Manual install (alternative)
 
@@ -52,6 +80,7 @@ A systemd service `unmi_TGtool` is registered and started automatically — auto
 | Settings panel `/calc` | decimals 1–6 / display format / conversion / chained calc |
 | Chained calc (off by default) | `3+3`=6, then `+3` → `6+3=9`; `/00` to exit; auto-exit after 3 min |
 | Functions & constants | `sqrt` `abs` `round` `ln` `lg` `log` `sin` `cos` `tan` `factorial` `gcd` `lcm` `max` `min`, `pi` `e` `tau` `phi` |
+| Scientific notation | `1e5`, `2.5e-3`; a half-written `1e` errors out instead of silently computing `1×e` |
 | Safe | AST allowlist evaluator, **no `eval`**; `__import__`/`open`/attribute access all rejected |
 
 ## Pluggable framework
@@ -59,16 +88,25 @@ A systemd service `unmi_TGtool` is registered and started automatically — auto
 Core is `main.py` (single entry, no business logic) + `modules/` (feature modules).
 
 ```
-main.py                  single entry: init / register / dispatch / poll
-core/                    framework (interface / Telegram wrapper / log / config)
+main.py                  single entry: init / assemble / dispatch / poll (no business logic)
+core/                    framework internals — modules depend on this only
+├── base.py              Module base class + return-value contract + JSON helpers
+├── registry.py          module registry: discover / validate / load / lifecycle
+├── config.py            config loading (env vars + data/modules.json)
+├── tg.py                Telegram API wrapper (BotContext)
+└── log.py               unified logging
 modules/
-├── calc.py              calculator (enabled by default)
+├── calc/                calculator (enabled by default, package form)
+│   ├── __init__.py      exports Plugin
+│   └── engine.py        evaluation core, framework-agnostic, testable standalone
 └── demo.py              example module (/ping /echo, disabled by default)
-TGcalc_bot.py            calculator business core
-data/modules.json        which modules to enable (order = priority)
+data/                    runtime data (not in the repo)
+├── modules.json         which modules to enable (order = priority)
+└── <module>.json        each module's own config
+docs/MODULE_GUIDE.md     module development guide
 ```
 
-### Add a module (3 steps)
+### Add a module (3 steps, no changes to main.py)
 
 | Step | What |
 |---|---|
@@ -76,12 +114,21 @@ data/modules.json        which modules to enable (order = priority)
 | 2 | Add `"mymodule"` to `enabled` in `data/modules.json` |
 | 3 | `sudo systemctl restart unmi_TGtool` |
 
-**Isolation**: every method call is wrapped in try/except — one module crashing never affects the others.
+Batteries included — full contract in the **[Module Development Guide](docs/MODULE_GUIDE.md)**:
+
+| Capability | Notes |
+|---|---|
+| Broken-module isolation | Import errors, missing metadata, duplicate names, unmet deps → the module is skipped with a reason in the log; everything else keeps running |
+| Dependency declaration | `requires = ["other_module_name"]`; order is validated at load time |
+| Per-module config | `self.load_config()` / `self.save_config()`, stored in `DATA_DIR/<module>.json`, atomic writes |
+| Full lifecycle | `on_start` / messages / commands / button callbacks / scheduled reports / `on_stop` (on systemd stop) |
+| Exception isolation | Every call is wrapped in try/except — one module crashing never affects the others |
 
 ## ⚠️ One token = one poller
 
 Telegram's `getUpdates` is exclusively consumed. Two processes on the same token split your
-messages randomly between them (half go missing). Use a separate bot token per instance.
+messages randomly between them (half go missing). Get a separate bot token per bot —
+the dashboard warns you on duplicates.
 
 ## Operations
 
@@ -91,9 +138,11 @@ sudo journalctl -u unmi_TGtool -f
 sudo systemctl restart unmi_TGtool        # required after editing code
 
 cd /opt/unmi_TGtool
-sudo python3 selftest_public.py           # framework + calculator (offline)
-sudo python3 selftest_calc.py             # calculator core, 203 tests
-sudo python3 main.py --dry-run            # load modules without polling
+sudo python3 selftest_public.py           # framework + module registry (offline, 20 tests)
+sudo python3 selftest_calc.py             # calculator core (offline, 203 tests)
+sudo python3 main.py --modules            # list modules and their status (broken ones show why)
+sudo python3 main.py --dry-run            # load per `enabled` without polling
+sudo python3 main.py --report daily       # trigger a scheduled report by hand
 ```
 
 ## Uninstall
@@ -104,6 +153,8 @@ sudo rm -f /etc/systemd/system/unmi_TGtool.service /etc/unmi_TGtool.env
 sudo rm -rf /opt/unmi_TGtool
 sudo systemctl daemon-reload
 ```
+
+To remove just one bot and keep the dashboard, run `unmi`, open that bot's page and pick «5».
 
 ## Tested on
 

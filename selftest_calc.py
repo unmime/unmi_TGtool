@@ -16,7 +16,9 @@ import sys
 import tempfile
 from fractions import Fraction as F
 
-import TGcalc_bot as calc
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from modules.calc import engine as calc      # noqa: E402
 
 VERBOSE = "-v" in sys.argv
 PASS, FAIL = [], []

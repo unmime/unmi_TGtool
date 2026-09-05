@@ -18,19 +18,27 @@
 set -euo pipefail
 
 # ---- 常量 ----
-VERSION="v3.1.0"
+VERSION="v1.0.0.0"
 REPO="unmime/unmi_TGtool"
 TAR_URL="https://github.com/${REPO}/releases/download/${VERSION}/unmi_TGtool.tar.gz"
 APP_DIR="/opt/unmi_TGtool"
 
 # ---- 颜色（非终端时自动关闭）----
 if [ -t 1 ]; then
-  C_RESET=$'\033[0m'; C_BOLD=$'\033[1m'
+  C_RESET=$'\033[0m'; C_BOLD=$'\033[1m'; C_DIM=$'\033[2m'
   C_CYAN=$'\033[36m'; C_GREEN=$'\033[32m'; C_YELLOW=$'\033[33m'
   C_RED=$'\033[31m'; C_PURPLE=$'\033[35m'
 else
-  C_RESET=""; C_BOLD=""; C_CYAN=""; C_GREEN=""; C_YELLOW=""; C_RED=""; C_PURPLE=""
+  C_RESET=""; C_BOLD=""; C_DIM=""; C_CYAN=""; C_GREEN=""; C_YELLOW=""; C_RED=""; C_PURPLE=""
 fi
+# 从终端读一行。优先 /dev/tty（兼容 `curl ... | bash` 时 stdin 是管道的情况），
+# 没有控制终端就退回 stdin，都读不到返回 1 —— 本脚本开了 set -e，裸 read 失败会直接中断安装。
+tty_read() {
+  local __v="$1"; shift
+  printf '%s' "$*" > /dev/tty 2>/dev/null || printf '%s' "$*"
+  read -r "$__v" < /dev/tty 2>/dev/null || read -r "$__v" || return 1
+}
+
 info()  { echo -e "${C_CYAN}  [i]${C_RESET} $*"; }
 ok()    { echo -e "${C_GREEN}  [✓]${C_RESET} $*"; }
 warn()  { echo -e "${C_YELLOW}  [!]${C_RESET} $*"; }
@@ -49,7 +57,7 @@ banner() {
    ╚═════╝ ╚═╝  ╚═══╝╚═╝     ╚═╝╚═╝
 EOF
   echo -e "${C_RESET}"
-  echo -e "  ${C_BOLD}unmi_TGtool${C_RESET} · 一台机器管理你所有的 Telegram 机器人"
+  echo -e "  ${C_BOLD}unmi_TGtool${C_RESET}  ${C_DIM}集中管理本机的 Telegram 机器人${C_RESET}"
   echo -e "  ${C_CYAN}github.com/${REPO}${C_RESET}   ${C_YELLOW}${VERSION}${C_RESET}"
 }
 
@@ -113,8 +121,7 @@ detect_proxy() {
   warn "连不上 api.telegram.org（国内服务器需要代理才能用 Telegram）"
   local p r
   while :; do
-    printf "  ${C_BOLD}代理地址${C_RESET}（如 http://127.0.0.1:7890）: " > /dev/tty
-    read -r p < /dev/tty
+    tty_read p "  ${C_BOLD}代理地址${C_RESET}（如 http://127.0.0.1:7890）: " || return
     if [ -z "$p" ]; then
       warn "连不上 Telegram 时必须配代理，否则机器人无法收发消息"
       continue
@@ -125,8 +132,7 @@ detect_proxy() {
       return
     fi
     warn "走 $p 也连不通 Telegram"
-    printf "  重新输入代理？[y/N] " > /dev/tty
-    read -r r < /dev/tty
+    tty_read r "  重新输入代理？[y/N] " || return
     if [ "$r" != "y" ]; then
       warn "暂未配置代理（可稍后敲 unmi → p 配置全局代理）"
       printf '' > "$APP_DIR/data/proxy.conf"
@@ -135,22 +141,20 @@ detect_proxy() {
   done
 }
 
-# ---- 引导添加第一个机器人 ----
-first_bot() {
+# ---- 安装完成，进入控制台主页（不直接弹添加流程，让用户自己选）----
+finish() {
   echo
   echo -e "${C_GREEN}${C_BOLD}════════════════════════════════════════${C_RESET}"
-  echo -e "${C_GREEN}${C_BOLD}  ✅ 框架安装完成！${C_RESET}"
+  echo -e "${C_GREEN}${C_BOLD}  ✅ 安装完成！${C_RESET}"
   echo -e "${C_GREEN}${C_BOLD}════════════════════════════════════════${C_RESET}"
   echo
-  echo -e "  接下来添加你的${C_BOLD}第一个机器人${C_RESET}（以后敲 ${C_CYAN}unmi${C_RESET} 可加更多）："
+  echo -e "  即将进入${C_BOLD}控制台主页${C_RESET}，你可以："
+  echo -e "    ${C_CYAN}a${C_RESET}) 添加机器人    ${C_CYAN}p${C_RESET}) 配置全局代理    ${C_CYAN}u${C_RESET}) 一键更新"
   echo
-  # 进入交互式添加流程（read 从 /dev/tty 读，兼容 curl|bash）
-  unmi add || true
+  echo -e "  ${C_DIM}（以后随时敲 ${C_CYAN}unmi${C_RESET}${C_DIM} 都能回到这个主页）${C_RESET}"
   echo
-  echo -e "${C_BOLD}  都装好了。${C_RESET}常用："
-  echo -e "    ${C_CYAN}unmi${C_RESET}        打开控制台（管理 / 添加更多机器人）"
-  echo -e "  在 Telegram 里发 ${C_CYAN}66*98${C_RESET} 给机器人就能算。"
-  echo
+  # 进入控制台主菜单（read 从 /dev/tty 读，兼容 curl|bash）
+  unmi || true
 }
 
 main() {
@@ -161,7 +165,7 @@ main() {
   download
   install_cli
   detect_proxy
-  first_bot
+  finish
 }
 
 main "$@"

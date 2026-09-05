@@ -29,7 +29,8 @@ if command -v pgrep >/dev/null; then
   if pgrep -af "getUpdates|main\.py|TG.*_bot\.py" 2>/dev/null | grep -v grep | grep -q .; then
     echo "    检测到可能已在运行的 bot 进程："
     pgrep -af "main\.py|TG.*_bot\.py" 2>/dev/null | grep -v grep | sed 's/^/      /' || true
-    read -r -p "    仍要继续安装？[y/N] " ans
+    # 读不到输入（非交互安装）就当「不继续」，别让 set -e 把安装流程打断
+    read -r -p "    仍要继续安装？[y/N] " ans || ans=""
     [ "$ans" = "y" ] || { echo "已取消"; exit 1; }
   fi
 fi
@@ -39,7 +40,13 @@ mkdir -p "$APP_DIR"
 cp -r "$SRC_DIR/core" "$APP_DIR/"
 cp -r "$SRC_DIR/modules" "$APP_DIR/"
 cp -r "$SRC_DIR/data" "$APP_DIR/"
-install -m 644 "$SRC_DIR/main.py" "$SRC_DIR/TGcalc_bot.py" "$APP_DIR/"
+install -m 644 "$SRC_DIR/main.py" "$APP_DIR/"
+[ -f "$SRC_DIR/VERSION" ] && install -m 644 "$SRC_DIR/VERSION" "$APP_DIR/VERSION"
+# 控制台命令：不装的话装完还得再跑一遍在线脚本才能用 unmi
+if [ -f "$SRC_DIR/unmi-cli.sh" ]; then
+  install -m 755 "$SRC_DIR/unmi-cli.sh" /usr/local/bin/unmi
+  echo "    已安装控制台命令：unmi"
+fi
 [ -f "$SRC_DIR/selftest_calc.py" ] && install -m 644 "$SRC_DIR/selftest_calc.py" "$APP_DIR/"
 [ -f "$SRC_DIR/selftest_public.py" ] && install -m 644 "$SRC_DIR/selftest_public.py" "$APP_DIR/"
 

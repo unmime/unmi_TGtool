@@ -13,6 +13,17 @@ from . import log as _log
 
 _LOG = _log.get("tg")
 
+MAX_TEXT = 4096                 # Telegram sendMessage 的硬上限
+_CLIP_TIP = "\n…（内容过长，已截断）"
+
+
+def _clip(text):
+    """超长文本截断，宁可少发一点，也不要整条被 Telegram 拒收。"""
+    text = "" if text is None else str(text)
+    if len(text) <= MAX_TEXT:
+        return text
+    return text[:MAX_TEXT - len(_CLIP_TIP)] + _CLIP_TIP
+
 
 class BotContext(object):
     """传给每个模块的上下文：Telegram API + 配置 + 日志。"""
@@ -48,6 +59,7 @@ class BotContext(object):
 
     # ------------------------------------------------------------ 快捷方法
     def send(self, text, buttons=None, silent=False, chat_id=None):
+        text = _clip(text)
         params = {"chat_id": chat_id or self.chat_id, "text": text,
                   "parse_mode": "HTML", "disable_web_page_preview": "true",
                   "disable_notification": "true" if silent else "false"}
@@ -57,7 +69,7 @@ class BotContext(object):
         return self.api("sendMessage", params)
 
     def edit(self, chat_id, message_id, text, buttons=None):
-        params = {"chat_id": chat_id, "message_id": message_id, "text": text,
+        params = {"chat_id": chat_id, "message_id": message_id, "text": _clip(text),
                   "parse_mode": "HTML", "disable_web_page_preview": "true"}
         if buttons:
             params["reply_markup"] = json.dumps({"inline_keyboard": buttons},

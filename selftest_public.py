@@ -17,6 +17,7 @@ os.environ["TG_BOT_TOKEN"] = "dummy"
 os.environ["TG_CHAT_ID"] = "12345"
 
 from core.config import Config              # noqa: E402
+from core.registry import Registry, discover  # noqa: E402
 from core.tg import BotContext              # noqa: E402
 import main                                 # noqa: E402
 
@@ -58,12 +59,9 @@ def main_test():
     global disp
     cfg = Config(BASE_DIR)
     ctx = FakeCtx(cfg.token, cfg.chat_id, cfg.data_dir)
-    mods = main.load_modules(cfg, ctx)
-    for m in mods:
-        try:
-            m.on_start()
-        except Exception:  # noqa: BLE001
-            pass
+    reg = Registry(ctx)
+    mods = reg.load(cfg.enabled)
+    reg.start()
     disp = main.Dispatcher(cfg, ctx, mods)
 
     print("[1] 开箱默认：只装计算器")
@@ -79,7 +77,7 @@ def main_test():
     check("/help 列出 calc 模块", any("calc" in t for t in out), True)
 
     print("[4] 连续计算")
-    import TGcalc_bot as c
+    from modules.calc import engine as c
     c.set_settings(ans_on=True)
     c.clear_ans()
     run("3+3")
@@ -91,6 +89,49 @@ def main_test():
     print("[6] 普通聊天兜底")
     main._LAST_HINT["t"] = 0.0
     check("非算式提示", any(u"算式" in t for t in run("hello")), True)
+
+    print("[8] 模块注册表：坏模块 / 依赖 / 重名 都要被拦住")
+    reg2 = Registry(ctx)
+    reg2.load(["calc", "calc", "nonexistent_module"])
+    check("重复加载只生效一次", len(reg2.modules), 1)
+    check("不存在的模块被记进 skipped", any("nonexistent" in i for i, _w in reg2.skipped), True)
+    check("坏模块不影响已加载的", reg2.modules[0].name, "calc")
+
+    # 依赖未满足：造一个依赖 demo 的模块，但 enabled 里 demo 排在后面
+    class _Needy(mods[0].__class__):
+        name = "needy"
+        version = "0.0.1"
+        description = "测试用"
+        requires = ["demo"]
+
+    import types
+    fake_mod = types.ModuleType("modules._fake_needy")
+    fake_mod.Plugin = _Needy
+    sys.modules["modules._fake_needy"] = fake_mod
+    reg3 = Registry(ctx)
+    reg3.load(["_fake_needy"])
+    check("依赖未满足时跳过", len(reg3.modules), 0)
+    reg4 = Registry(ctx)
+    reg4.load(["demo", "_fake_needy"])
+    check("依赖在前则正常加载", [m.name for m in reg4.modules], ["demo", "needy"])
+    sys.modules.pop("modules._fake_needy", None)
+
+    print("[9] 模块独立配置（原子写）")
+    m0 = mods[0]
+    m0.save_config({"x": 1})
+    check("配置写读一致", m0.load_config().get("x"), 1)
+    check("配置文件名 = 模块名", os.path.basename(m0.config_path), "calc.json")
+    # 写坏的文件不能让模块起不来
+    open(m0.config_path, "w").write("{ 坏掉的 json")
+    check("配置损坏时回退默认值", m0.load_config({"fallback": True}), {"fallback": True})
+    m0.save_config({})
+
+    print("[10] 发现机制")
+    found = {r["id"]: r for r in discover()}
+    check("能发现 calc", found.get("calc", {}).get("ok"), True)
+    check("能发现 demo", found.get("demo", {}).get("ok"), True)
+    check("calc 声明了 /calc 命令",
+          any(c.get("command") == "calc" for c in found.get("calc", {}).get("commands", [])), True)
 
     print("[7] 热插拔 demo")
     import modules.demo as demo_mod

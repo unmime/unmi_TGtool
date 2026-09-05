@@ -4,6 +4,9 @@
 
 职责：初始化、配置加载、模块注册与调度。**不包含任何具体业务逻辑。**
 
+模块接入全部走 core/registry.py：主程序不认识任何具体模块，
+只按 enabled 列表让注册表去发现、校验、实例化、驱动生命周期。
+
 调度规则：
   消息   按 enabled 顺序逐个问每个模块 on_message，第一个返回 True 的接管
   命令   按顺序逐个问 on_command，第一个不返回 PASS 的接管
@@ -13,8 +16,8 @@
 模块间隔离：每个模块的每个方法调用都被 try/except 包裹，
 某个模块抛异常只记日志，不影响其他模块和整条消息流。
 """
-import importlib
 import os
+import signal
 import sys
 import threading
 import time
@@ -25,6 +28,7 @@ sys.path.insert(0, BASE_DIR)
 from core import log as _log          # noqa: E402
 from core.base import PASS            # noqa: E402
 from core.config import Config        # noqa: E402
+from core.registry import Registry, discover   # noqa: E402
 from core.tg import BotContext        # noqa: E402
 
 _LOG = _log.get("main")
@@ -37,20 +41,23 @@ _LAST_HINT = {"t": 0.0}                # 兜底提示限流（120 秒一次）
 # 模块加载
 # ---------------------------------------------------------------------------
 
-def load_modules(cfg, ctx):
-    """按 enabled 列表加载模块，加载失败只记日志跳过，不拖垮整个启动。"""
-    out = []
-    for name in cfg.enabled:
+def install_signals(registry):
+    """收到 SIGTERM / SIGINT 时先让模块优雅收尾（on_stop），再退出。
+
+    systemd restart / stop 发的就是 SIGTERM；不接的话 on_stop 永远不会被调用。
+    """
+    def _handler(signum, _frame):
+        _LOG.info("收到信号 %s，停止中…", signum)
         try:
-            mod = importlib.import_module("modules.%s" % name)
-            cls = getattr(mod, "Plugin")
-            out.append(cls(ctx))
-            _LOG.info("模块加载: %s v%s（%s）",
-                      name, getattr(cls, "version", "?"),
-                      getattr(cls, "description", ""))
-        except Exception as e:  # noqa: BLE001
-            _LOG.error("模块 %s 加载失败（%s），跳过", name, e)
-    return out
+            registry.stop()
+        finally:
+            sys.exit(0)
+
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        try:
+            signal.signal(sig, _handler)
+        except (ValueError, OSError):
+            pass                       # 非主线程里装信号会失败，忽略即可
 
 
 def _call(mod, meth, *a):
@@ -125,10 +132,16 @@ class Dispatcher(object):
     # ------------------------------------------------------------- 回调
     def handle_callback(self, cb):
         data = cb.get("data") or ""
+        # 回调也要认人：按钮只出现在自己那台 bot 的会话里，别人的会话点了不处理
+        msg = cb.get("message") or {}
+        cb_chat = str((msg.get("chat") or {}).get("id", ""))
+        if cb_chat and cb_chat != self.ctx.chat_id:
+            _LOG.warn("忽略非授权会话的回调：%s", cb_chat)
+            self.ctx.answer(cb.get("id"), "")
+            return
         _LOG.info("callback: %s", data)
         for m in self.modules:
-            ok, handled = _call(m, "on_callback",
-                                data, cb.get("id"), cb.get("message") or {})
+            ok, handled = _call(m, "on_callback", data, cb.get("id"), msg)
             if ok and handled:
                 return
         self.ctx.answer(cb.get("id"), "")
@@ -180,12 +193,17 @@ def poll_loop(disp):
 # ---------------------------------------------------------------------------
 
 def build(cfg):
+    """按配置装配出一整套运行时：上下文 + 模块 + 调度器。"""
     os.makedirs(cfg.data_dir, exist_ok=True)
     ctx = BotContext(cfg.token, cfg.chat_id, cfg.data_dir)
-    modules = load_modules(cfg, ctx)
-    for m in modules:
-        _call(m, "on_start")
-    return ctx, modules, Dispatcher(cfg, ctx, modules)
+
+    registry = Registry(ctx)
+    registry.load(cfg.enabled)
+    registry.start()
+
+    if registry.skipped:
+        _LOG.error("有 %d 个模块没加载成（见上面的原因）", len(registry.skipped))
+    return ctx, registry, Dispatcher(cfg, ctx, registry.modules)
 
 
 def main():
@@ -203,25 +221,41 @@ def main():
         if kind not in REPORT_KINDS:
             _LOG.error("usage: main.py --report %s", "|".join(REPORT_KINDS))
             return 2
-        _ctx, _mods, disp = build(cfg)
+        _ctx, reg, disp = build(cfg)
         disp.run_report(kind)
+        reg.stop()
         _LOG.info("report %s done", kind)
         return 0
 
+    if "--modules" in sys.argv:
+        rows = discover()
+        print("modules/ 下发现 %d 个模块：" % len(rows))
+        for r in rows:
+            if r["ok"]:
+                dep = ("（依赖：%s）" % "、".join(r["requires"])) if r["requires"] else ""
+                print("  [✓] %-10s v%-8s %s%s" % (r["id"], r["version"], r["description"], dep))
+            else:
+                print("  [✗] %-10s %s" % (r["id"], r["error"]))
+        return 0
+
     if "--dry-run" in sys.argv:
-        _ctx, mods, _disp = build(cfg)
-        print("加载模块 %d 个：" % len(mods))
-        for m in mods:
+        _ctx, reg, _disp = build(cfg)
+        print("加载模块 %d 个：" % len(reg.modules))
+        for m in reg.modules:
             print("  - %s v%s  %s" % (m.name, m.version, m.description))
+        for mid, why in reg.skipped:
+            print("  ! %s 未加载：%s" % (mid, why))
+        reg.stop()
         print("OK（未开始轮询）")
         return 0
 
-    _ctx, _mods, disp = build(cfg)
+    _ctx, reg, disp = build(cfg)
+    install_signals(reg)          # 退出前给模块一个收尾的机会
     # 命令菜单由已启用模块自己声明（Module.commands），主程序只负责汇总。
     # setMyCommands 是全量覆盖，绝不能在这里硬编码部分命令——
     # 否则会把别的模块的命令（如 /crowdsec、/qinglong）从菜单顶掉。
     cmds = []
-    for m in _mods:
+    for m in reg.modules:
         cmds.extend(getattr(m, "commands", None) or [])
     cmds.append({"command": "help", "description": "❓ 使用说明"})
     _ctx.setup_commands(

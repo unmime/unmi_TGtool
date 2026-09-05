@@ -58,6 +58,10 @@ degrees radians rad deg factorial fact pow gcd lcm max min""".split())
 
 _TOKEN_RE = re.compile(r"[0-9A-Za-z._]+")
 _SCI_RE = re.compile(r"^\d+(\.\d+)?[eE][+-]?\d+$")
+# 写了一半的科学计数法：1e / 1e+ / 2.5e- —— 标准计算器一律报错。
+# 前面排除 0x1e 这类十六进制（e 的左边紧挨着字母数字时不算），
+# 后面排除真正的指数（e 后跟可带正负号的整数）。
+_BAD_SCI_RE = re.compile(r"(?<![0-9A-Za-z_.])[0-9]+(?:\.[0-9]+)?[eE](?![+-]?[0-9])")
 _RADIX_RE = re.compile(r"^0[xXoObB][0-9a-fA-F_]+$")
 
 # 连续计算：以运算符开头、后面只跟一个数字 —— 如 +3 / *2 / -5 / ^2 / //2
@@ -87,7 +91,39 @@ class CalcError(Exception):
     pass
 
 
-def _normalize(text):
+def _insert_implicit_mul(s):
+    """隐式乘法补乘号：数字/括号/常量直接相连时插入 *。
+
+    例：10(1*2) → 10*(1*2)   2pi → 2*pi   (1+2)(3+4) → (1+2)*(3+4)   pi(2) → pi*(2)
+    先把 0x/0b/0o 进制数与科学计数法 1e5 保护起来，避免被拆成 0*ff / 1*e5；
+    函数名不受影响（sqrt(4) 的 t 是字母不是数字，sqrt 也不在常量表里）。
+    """
+    protected = []
+
+    def _protect(m):                       # 把特殊数换成占位符，处理完再换回
+        protected.append(m.group(0))
+        return "\x00%d\x00" % (len(protected) - 1)
+
+    s = re.sub(
+        r"0[xX][0-9a-fA-F]+|0[bB][01]+|0[oO][0-7]+|\d+(?:\.\d+)?[eE][+-]?\d+",
+        _protect, s)
+    # 1. ) 后接 ( / 数字 / 字母：)→ )*
+    s = re.sub(r"\)(?=[(\dA-Za-z])", ")*", s)
+    # 2. 数字 后接 ( / 字母：数字 → 数字*（进制/科学计数法已保护，不会误伤）
+    s = re.sub(r"(\d)(?=[(A-Za-z])", r"\1*", s)
+    # 3. 常量名 后接 (：pi( e( tau( phi( → 加 *
+    for cst in ("pi", "e", "tau", "phi"):
+        s = re.sub(r"(?<![A-Za-z0-9_])" + cst + r"(?=\()", cst + "*", s)
+    for i, p in enumerate(protected):      # 恢复被保护的特殊数
+        s = s.replace("\x00%d\x00" % i, p)
+    return s
+
+
+def _pre_normalize(text):
+    """归一化，但不补隐式乘法。
+
+    畸形输入检测必须看这一层：`1e` 一旦被补成 `1*e`，就看不出它是残缺的科学计数法了。
+    """
     s = str(text or "").translate(_TRANS)
     s = re.sub(r"\s+", "", s)
     # 去掉结尾的 = ? 等
@@ -101,8 +137,23 @@ def _normalize(text):
     return s
 
 
+def _normalize(text):
+    return _insert_implicit_mul(_pre_normalize(text))
+
+
 def is_cont_input(text):
     """连续计算输入判定（含斜杠除法 /0 /5，供主程序在命令分支之前调用）。
+
+    调用方在 try 之外用它，所以这里不能抛异常：任何畸形输入一律当「不是连续计算」。
+    """
+    try:
+        return _is_cont_input(text)
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _is_cont_input(text):
+    """连续计算输入的实际判定（异常由 is_cont_input 兜掉）。
 
     开启 ans_on 时：+3 *2 -5 ^2 //5 %7 /0 以及单独的 ans 都算连续计算输入。
     /menu /calc 这类「斜杠+字母」不算，仍走命令。
@@ -765,6 +816,10 @@ def calc_msgs(raw):
     第 1 条：主结果（不带按钮，设置走 /calc 菜单）；
     第 2 条（可选）：自然读法 / 会计大写。
     """
+    # 必须在补隐式乘法之前判：_normalize 会把 1e 补成 1*e，
+    # 洗白成「1×自然常数」算出一个莫名其妙的结果，而不是报「写法不完整」。
+    if _BAD_SCI_RE.search(_pre_normalize(raw)):
+        raise CalcError("科学计数法缺指数：e 后面要跟数字，例如 1e5、2.5e-3")
     expr = _normalize(raw)
     if not looks_like_expr(raw) and not expr:
         raise CalcError("这不是一个算式")
