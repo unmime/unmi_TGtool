@@ -91,11 +91,8 @@ def _menu_main():
                    else u"🪙 加密货币：关")
     text = (
         u"💱 <b>汇率换算</b>\n\n"
-        u"直接发金额就能换，比如 <code>22人民币</code> / <code>$100</code> / <code>100usd</code>"
-        + (u" / <code>0.5btc</code>\n" if st["crypto_on"] else u"\n")
-        + (u"🪙 支持加密货币（实时价）：%s 等 %d 种\n\n" % (crypto, len(fx.CRYPTO_NAMES))
-           if st["crypto_on"] else u"\n")
-        + u"🌐 展示货币：%s\n"
+        u"直接发金额就能换，比如 <code>22人民币</code> / <code>$100</code> / <code>100usd</code>\n\n"
+        u"🌐 展示货币：%s\n"
         u"🎯 默认目标：%s（%s）\n"
         u"🔌 汇率源：%s\n"
         u"%s" % (
