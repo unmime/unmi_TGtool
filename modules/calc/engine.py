@@ -1048,16 +1048,20 @@ def settings_panel():
         % (s["decimals"], FMT_LABEL[s["fmt"]], conv_txt, CONV_LABEL[s["conv_mode"]],
            ans_txt)
     )
+    # 显示格式：paren 是 eq 的超集 → 选 paren 时 eq 也亮
+    def _fmt_on(f):
+        if f == "eq":
+            return s["fmt"] in ("eq", "paren")
+        return s["fmt"] == f
     kb = [
         # 小数位 6 档拆两行（3+3），否则勾选标记会把按钮挤到被 Telegram 截断
         [{"text": _tag(u"%d 位" % d, s["decimals"] == d),
           "callback_data": "calcset:dec:%d" % d} for d in DECIMAL_CHOICES[:3]],
         [{"text": _tag(u"%d 位" % d, s["decimals"] == d),
           "callback_data": "calcset:dec:%d" % d} for d in DECIMAL_CHOICES[3:]],
-        # 显示格式拆两行：长短按钮分开排，长选项独占一行
-        [{"text": _tag(FMT_LABEL[f], s["fmt"] == f),
+        [{"text": _tag(FMT_LABEL[f], _fmt_on(f)),
           "callback_data": "calcset:fmt:%s" % f} for f in FMT_ORDER[:2]],
-        [{"text": _tag(FMT_LABEL[f], s["fmt"] == f),
+        [{"text": _tag(FMT_LABEL[f], _fmt_on(f)),
           "callback_data": "calcset:fmt:%s" % f} for f in FMT_ORDER[2:]],
         [{"text": _tag(u"转换：开", s["conv_on"]) if s["conv_on"] else u"转换：关",
           "callback_data": "calcset:conv:toggle"}],
