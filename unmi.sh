@@ -18,7 +18,7 @@
 set -euo pipefail
 
 # ---- 常量 ----
-VERSION="v1.0.0.5"
+VERSION="v1.0.0.6"
 REPO="unmime/unmi_TGtool"
 # 始终拉 latest，不要把 VERSION 拼进链接。
 #
@@ -31,6 +31,27 @@ TAR_URL="https://github.com/${REPO}/releases/latest/download/unmi_TGtool.tar.gz"
 # latest 取不到时的兜底（写死版本），保证脚本离线/异常时仍可安装
 TAR_URL_FALLBACK="https://github.com/${REPO}/releases/download/${VERSION}/unmi_TGtool.tar.gz"
 APP_DIR="/opt/unmi_TGtool"
+
+# 版本号比较：a >= b 返回 0。只比数字段，忽略前缀 v 和非数字后缀。
+_ver_ge() {
+  local a b i
+  # shellcheck disable=SC2183,SC2046  # 这里就是要按点拆成数字段来逐段比较
+  local -a A B
+  a="${1#v}"; b="${2#v}"
+  IFS=. read -r -a A <<< "$a"
+  IFS=. read -r -a B <<< "$b"
+  local n=${#A[@]}
+  [ ${#B[@]} -gt "$n" ] && n=${#B[@]}
+  i=0
+  while [ "$i" -lt "$n" ]; do
+    local x="${A[$i]:-0}" y="${B[$i]:-0}"
+    case "$x$y" in *[!0-9]*) return 0 ;; esac
+    [ "$x" -gt "$y" ] && return 0
+    [ "$x" -lt "$y" ] && return 1
+    i=$((i + 1))
+  done
+  return 0
+}
 
 # ---- 颜色（非终端时自动关闭）----
 if [ -t 1 ]; then
@@ -120,7 +141,20 @@ download() {
   step "安装代码框架到 $APP_DIR"
   mkdir -p "$APP_DIR"
   tar xzf "$TMP_DIR/pkg.tar.gz" -C "$APP_DIR" --strip-components=1
-  # 版本号以包里带的为准（拉的是 latest，实际版本由包决定，不是脚本里写死的那个）
+
+  # releases/latest 这个链接同样会被 CDN 缓存（国内实测：脚本已是 v1.0.0.5，latest 仍返回 v1.0.0.4 的包）。
+  # 所以装完核一下包里的版本号：比脚本已知的还旧，就改用固定版本链接重下一次。
+  if [ -f "$APP_DIR/VERSION" ]; then
+    local pv; pv="$(tr -d ' \t\r\n' < "$APP_DIR/VERSION")"
+    if [ -n "$pv" ] && [ "$pv" != "$VERSION" ] && ! _ver_ge "$pv" "$VERSION"; then
+      warn "latest 给的是旧包（$pv，预期 $VERSION），改用固定版本重新下载"
+      curl -fsSL --connect-timeout 20 "$TAR_URL_FALLBACK" -o "$TMP_DIR/pkg.tar.gz" \
+        || { err "重新下载失败：$TAR_URL_FALLBACK"; exit 1; }
+      tar xzf "$TMP_DIR/pkg.tar.gz" -C "$APP_DIR" --strip-components=1
+    fi
+  fi
+
+  # 版本号以包里带的为准（实际装的是哪个版本由包决定）
   if [ -f "$APP_DIR/VERSION" ]; then
     VERSION="$(tr -d ' \t\r\n' < "$APP_DIR/VERSION")"
   else
