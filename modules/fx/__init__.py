@@ -261,17 +261,24 @@ def _amt_str(amount, frm, expr):
 
 
 def _fmt_pair(amount, frm, to, data, expr=None):
-    """单币种结果：金额前带国旗和代码。返回 HTML 文本。"""
+    """单币种结果：与多币种同款布局（头行 → 分割线 → 结果行 → 汇率 → 源）。"""
     rates = data["rates"]
     out = fx.convert(amount, frm, to, rates)
     rate = fx.convert(1, frm, to, rates)
-    return (
-        u"%s %s %s（%s）≈ <code>%s</code> %s %s（%s）\n"
-        u"1 %s = %s %s\n"
-        u"<i>%s</i>" % (
-            _amt_str(amount, frm, expr), fx.flag(frm) or u"　", fx.cn_name(frm), frm,
-            fx.fmt_amt(out) + fx.unit(to), fx.flag(to) or u"　", fx.cn_name(to), to,
-            frm, fx.fmt_rate(rate), to, data["src"]))
+    head = _amt_str(amount, frm, expr)
+    lines = [
+        u"%s %s（%s） <code>%s</code>" % (
+            fx.flag(frm) or u"　", fx.cn_name(frm), frm, head),
+        _divider(u"%s %s（%s） %s" % (fx.flag(frm) or u"　",
+                 fx.cn_name(frm), frm, head)),
+        u"%s %s%s <code>%s%s</code>" % (
+            fx.flag(to) or u"　", fx.cn_name(to),
+            u"（%s）" % to if fx.cn_name(to) != to else "",
+            fx.fmt_amt(out), fx.unit(to)),
+        u"1 %s = %s %s" % (frm, fx.fmt_rate(rate), to),
+        u"<i>%s</i>" % data["src"],
+    ]
+    return u"\n".join(lines)
 
 
 def _fmt_targets(amount, frm, targets, data, expr=None):
