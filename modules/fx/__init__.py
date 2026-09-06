@@ -105,7 +105,7 @@ def _menu_main():
         u"直接发金额就能换，比如 <code>22人民币</code> / <code>zg</code> / <code>$100</code> / <code>100usd</code>\n\n"
         u"🌐 展示货币：%s\n"
         u"🎯 默认目标：%s（%s）\n"
-        u"🔌 汇率源：%s\n"
+        u"💵 汇率源：%s\n"
         u"%s" % (
             disp_txt, fx.cn_name(st["target"]), st["target"], src, crypto_line))
     kb = [
@@ -113,7 +113,7 @@ def _menu_main():
           "callback_data": "%s:cur:typein:0" % _CB}],
         [{"text": u"🔄 重置展示货币", "callback_data": "%s:cur:reset" % _CB}],
         [{"text": u"🎯 默认目标 ▸", "callback_data": "%s:tgt:page:0" % _CB},
-         {"text": u"🔌 汇率源 ▸", "callback_data": "%s:api:open" % _CB}],
+         {"text": u"💵 汇率源 ▸", "callback_data": "%s:api:open" % _CB}],
         [{"text": u"🪙 加密货币换算：%s" % (u"🟢 开" if st["crypto_on"] else u"⚪ 关"),
           "callback_data": "%s:cryptotoggle" % _CB}],
         [{"text": u"🪙 输入加密货币关键字添加转换货币",
@@ -172,9 +172,7 @@ def _menu_api():
     st = fx.get_settings()
     cur = st["source"]
     csrc = st.get("crypto_source", "binance")
-    csrc_name = next((a["name"] for a in fx.CRYPTO_SOURCES if a["id"] == csrc),
-                     csrc)
-    lines = [u"🔌 <b>汇率源</b>（免费源，点一个切换）", ""]
+    lines = [u"💵 <b>汇率源</b>（免费源，点一个切换）", ""]
     kb = []
     for a in fx.BUILTIN_APIS:
         on = a["id"] == cur
@@ -183,21 +181,9 @@ def _menu_api():
         kb.append([{"text": _tag(u"💵 %s 💵" % a["name"], on),
                     "callback_data": "%s:api:use:%s" % (_CB, a["id"])}])
     lines.append(u"")
-    lines.append(u"🪙 加密货币源：%s" % csrc_name)
-    kb.append([{"text": u"🪙 加密货币源 ▸",
-                "callback_data": "%s:csrc:open" % _CB}])
-    kb.append(_BACK_CLOSE)
-    return u"\n".join(lines), kb
-
-
-def _menu_csrc():
-    """加密货币源选择页（🪙 标识）。"""
-    st = fx.get_settings()
-    cur = st.get("crypto_source", "binance")
-    lines = [u"🪙 <b>加密货币源</b>（点一个切换）", ""]
-    kb = []
+    lines.append(u"🪙 <b>加密货币源</b>（实时价，点一个切换）")
     for a in fx.CRYPTO_SOURCES:
-        on = a["id"] == cur
+        on = a["id"] == csrc
         lines.append(u"%s <b>🪙 %s 🪙</b> — %s"
                      % (u"🟢" if on else u"⚪", a["name"], a["desc"]))
         kb.append([{"text": _tag(u"🪙 %s 🪙" % a["name"], on),
@@ -384,14 +370,7 @@ class Plugin(Module):
             self.ctx.answer(cb_id, u"🪙 加密货币换算已开启" if st["crypto_on"]
                             else u"加密货币换算已关闭")
             return True
-        if action == "csrc" and len(parts) >= 3:
-            sub = parts[2]
-            if sub == "open":
-                t, kb = _menu_csrc()
-                self.ctx.edit(chat_id, message_id, t, kb)
-                self.ctx.answer(cb_id, "")
-                return True
-            if sub == "use" and len(parts) >= 4:
+        if action == "csrc" and len(parts) >= 4 and parts[2] == "use":
                 src = parts[3]
                 if not any(a["id"] == src for a in fx.CRYPTO_SOURCES):
                     self.ctx.answer(cb_id, u"⚠️ 这个源不存在")
