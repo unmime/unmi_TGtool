@@ -220,7 +220,8 @@ with open(fx.SETTINGS_FILE, "w") as f:
 from modules import fx as fx_mod
 text, multi = fx_mod._fmt_multi(22, "CNY", {"rates": RATES, "src": "test"})
 check_true("返回多币种", multi)
-check_true("含 1 个源金额 + 3 行换算", text.count("<code>") == 4)
+check_true("pre 等宽块 + 源标注", text.startswith("<pre>")
+           and text.endswith("</pre>") and "open.er-api.com" in text)
 check_true("含国旗", "🇺🇸" in text)
 check_true("源币种不出现在展示里", "USD（CNY" not in text)
 # 勾选的展示货币就是源币种 → 回落单出

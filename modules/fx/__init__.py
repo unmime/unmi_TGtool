@@ -232,7 +232,9 @@ def _disp_width(text):
     plain = _re.sub(r"<[^>]+>", "", text)   # 剥掉 HTML 标签
     w = 0
     for ch in plain:
-        if ord(ch) >= 0x1F000 or unicodedata.east_asian_width(ch) in ("W", "F"):
+        if 0x1F1E6 <= ord(ch) <= 0x1F1FF:   # 区域指示符：成对国旗合计算 2
+            w += 1
+        elif ord(ch) >= 0x1F000 or unicodedata.east_asian_width(ch) in ("W", "F"):
             w += 2
         else:
             w += 1
@@ -248,6 +250,12 @@ def _center_text(text):
                       for l, w in zip(lines, widths))
 
 
+def _mono_pad(text, width):
+    """等宽字体补齐：按字符数（<pre> 里 CJK 2 格、ASCII 1 格，_disp_width 已算好）。"""
+    pad = width - _disp_width(text)
+    return text + u" " * max(0, pad)
+
+
 def _divider(header_text):
     """按标题行的显示宽度生成分割线（─ 按 1 格计，略留余量）。"""
     return u"─" * max(4, _disp_width(header_text))
@@ -261,48 +269,65 @@ def _amt_str(amount, frm, expr):
 
 
 def _fmt_pair(amount, frm, to, data, expr=None):
-    """单币种结果：与多币种同款布局（头行 → 分割线 → 结果行 → 汇率 → 源）。"""
+    """单币种结果：<pre> 等宽字体，列强制对齐。"""
     rates = data["rates"]
     out = fx.convert(amount, frm, to, rates)
     rate = fx.convert(1, frm, to, rates)
-    head = _amt_str(amount, frm, expr)
+    head_amt = _amt_str(amount, frm, expr)
+    res_amt = fx.fmt_amt(out) + fx.unit(to)
+    name_f, name_t = fx.cn_name(frm), fx.cn_name(to)
+    flag_f = fx.flag(frm) or u"　"
+    flag_t = fx.flag(to) or u"　"
+    name_w = max(_disp_width(name_f), _disp_width(name_t))
+    code_w = max(len(frm), len(to)) + 2        # 含半角括号
+    amt_w = max(_disp_width(head_amt), _disp_width(res_amt))
+
+    def _row(flag, name, code, amt):
+        return u"%s %s %s %s" % (flag,
+                                 _mono_pad(name, name_w),
+                                 _mono_pad(u"(%s)" % code, code_w),
+                                 amt.rjust(amt_w))
+
+    div = u"─" * _disp_width(_row(flag_f, name_f, frm, head_amt))
     lines = [
-        u"%s %s（%s） <code>%s</code>" % (
-            fx.flag(frm) or u"　", fx.cn_name(frm), frm, head),
-        _divider(u"%s %s（%s） %s" % (fx.flag(frm) or u"　",
-                 fx.cn_name(frm), frm, head)),
-        u"%s %s%s <code>%s%s</code>" % (
-            fx.flag(to) or u"　", fx.cn_name(to),
-            u"（%s）" % to if fx.cn_name(to) != to else "",
-            fx.fmt_amt(out), fx.unit(to)),
+        _row(flag_f, name_f, frm, head_amt) + u" ≈",
+        div,
+        _row(flag_t, name_t, to, res_amt),
         u"1 %s = %s %s" % (frm, fx.fmt_rate(rate), to),
         u"<i>%s</i>" % data["src"],
     ]
-    return u"\n".join(lines)
+    return u"<pre>%s</pre>" % u"\n".join(lines)
 
 
 def _fmt_targets(amount, frm, targets, data, expr=None):
-    """按给定目标列表排版的多币种结果。"""
+    """多币种结果：<pre> 等宽字体，列强制对齐。"""
     rates = data["rates"]
-    if expr:                        # 算式放 <code> 外，点复制只拿结果值
-        head = u"%s %s（%s） %s = <code>%s%s</code> ≈" % (
-            fx.flag(frm) or u"　", fx.cn_name(frm), frm, expr,
-            fx.fmt_amt(amount), fx.unit(frm))
-    else:
-        head = u"%s %s（%s） <code>%s%s</code> ≈" % (
-            fx.flag(frm) or u"　", fx.cn_name(frm), frm,
-            fx.fmt_amt(amount), fx.unit(frm))
-    lines = [head, _divider(head)]
-    top_div = lines[-1]                 # 底部分割线与顶部同长
+    head_amt = _amt_str(amount, frm, expr)
+    name_f = fx.cn_name(frm)
+    flag_f = fx.flag(frm) or u"　"
+    rows_info = []
     for c in targets:
         out = fx.convert(amount, frm, c, rates)
-        fl = fx.flag(c)
-        lines.append(u"   %s %s（%s） <code>%s%s</code>" % (
-            fl or u"　", fx.cn_name(c), c,
-            fx.fmt_amt(out), fx.unit(c)))
-    lines.append(top_div)
-    lines.append(u"<i>%s</i>" % data["src"])
-    return u"\n".join(lines)
+        rows_info.append((fx.flag(c) or u"　", fx.cn_name(c), c,
+                          fx.fmt_amt(out) + fx.unit(c)))
+    name_w = max([_disp_width(name_f)] +
+                 [_disp_width(n_) for _f, n_, _c, _a in rows_info])
+    code_w = max([len(frm)] + [len(c_) for _f, _n, c_, _a in rows_info]) + 2
+    amt_w = max([_disp_width(head_amt)] +
+                [_disp_width(a_) for _f, _n, _c, a_ in rows_info])
+
+    def _row(flag, name, code, amt):
+        return u"%s %s %s %s" % (flag,
+                                 _mono_pad(name, name_w),
+                                 _mono_pad(u"(%s)" % code, code_w),
+                                 amt.rjust(amt_w))
+
+    div = u"─" * _disp_width(_row(flag_f, name_f, frm, head_amt))
+    lines = [_row(flag_f, name_f, frm, head_amt) + u" ≈", div]
+    for flag, name, code, amt in rows_info:
+        lines.append(_row(flag, name, code, amt))
+    lines += [div, u"<i>%s</i>" % data["src"]]
+    return u"<pre>%s</pre>" % u"\n".join(lines)
 
 
 def _fmt_multi(amount, frm, data, expr=None):
@@ -684,7 +709,7 @@ class Plugin(Module):
             out = _fmt_pair(amount, frm, to, data, expr)
             if hint:
                 out += u"\n%s" % hint
-            return (_center_text(out), None)
+            return (out, None)
         # 未指定目标：法币源走法币展示单，加密源走加密展示单（互不掺和）
         st = fx.get_settings()
         if frm in fx.CRYPTO_NAMES:
@@ -695,7 +720,7 @@ class Plugin(Module):
                               buttons=[[{"text": u"➕️ 添加加密货币",
                                          "callback_data": "%s:cur:typeinc:0" % _CB}]])
                 return None
-            return (_center_text(_fmt_targets(amount, frm, targets, data, expr)), None)
+            return (_fmt_targets(amount, frm, targets, data, expr), None)
         targets = [c for c in st["display"]
                    if c != frm and c not in fx.CRYPTO_NAMES and c in rates]
         if not targets:
@@ -707,4 +732,4 @@ class Plugin(Module):
         hint = fx.euro_country_hint(text) if frm == "EUR" else None
         if hint:
             out += u"\n%s" % hint
-        return (_center_text(out), None)
+        return (out, None)
