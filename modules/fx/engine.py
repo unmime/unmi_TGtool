@@ -303,6 +303,17 @@ def save_settings(st):
         pass
 
 
+# ---------------------------------------------------------------- 联动计算结果
+def last_calc_value():
+    """上一次计算结果（联动 calc 的 ans，3 分钟内有效）；没有返回 None。"""
+    try:
+        from modules.calc import engine as _c
+        v = _c.get_ans()
+        return float(v) if v is not None else None
+    except Exception:                       # noqa: BLE001
+        return None
+
+
 # ---------------------------------------------------------------- 汇率获取
 def _fetch_source(api):
     """按内置源拉汇率，按各自的 JSON 结构解析。失败返回 None。"""
@@ -564,7 +575,8 @@ def parse_query_ex(text):
     else:
         to = codes[1:]
     return {"amount": amount, "frm": frm, "to": to,
-            "used_alias": used_alias, "expr": expr}
+            "used_alias": used_alias, "expr": expr,
+            "has_amount": number is not None}
 
 
 def parse_query(text):

@@ -330,6 +330,13 @@ class Plugin(Module):
         q = fx.parse_query_ex(text)
         if not q:
             return False
+        # 裸币种（无金额无别名，如刚算完 66*9/8 后补个 mj）：用上一次计算结果换算
+        if not q["has_amount"] and q["frm"] and not q["used_alias"]:
+            ans = fx.last_calc_value()
+            if ans is not None:
+                self._reply(ans, q["frm"], q["to"], text)
+                return True
+            return False                # 没有上一次结果 → 保持沉默（原行为）
         # 触发门槛：裸三字码不带金额不回（防 "usd"/"try" 这类闲聊误伤）
         if not q["used_alias"] and q["amount"] == 1.0:
             return False
