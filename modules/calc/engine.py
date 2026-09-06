@@ -193,8 +193,9 @@ def looks_like_expr(text):
     s = _normalize(text)
     if not s:
         return False
-    if s.replace(",", "").replace(".", "").isdigit():
+    if re.fullmatch(r"\d{1,3}(?:,\d{3})*(?:\.\d+)?|\d+(?:\.\d+)?", s):
         return True                             # 纯数字（44 / 1,500 / 3.14）也算算式
+                                                # （限 0~1 个小数点，IP 形如 8.8.8.8 不误伤）
     if len(s) < 3 or len(s) > MAX_LEN:
         return False
     if _IPV4_RE.search(s) or ":" in s:          # 别把 1.2.3.0/24 或 IPv6 当算式
