@@ -130,11 +130,11 @@ check("XYZ（不在表里，回退代码）", fx.cn_name("XYZ"), "XYZ")
 print(u"── 7. 缓存读写（临时目录）")
 tmpd = tempfile.mkdtemp()
 fx._CACHE_FILE = os.path.join(tmpd, "rates.json")
-fake = {"rates": dict(RATES, BTC=6.5), "ts": 1, "src": "test", "api": "erapi", "fetched_at": 10**12}   # fetched_at 在未来 → 永不过期
+fake = {"rates": dict(RATES, BTC=6.5), "ts": 1, "src": "open.er-api.com", "api": "erapi", "fetched_at": 10**12}   # fetched_at 在未来 → 永不过期
 with open(fx._CACHE_FILE, "w") as f:
     json.dump(fake, f)
 data = fx.load_rates()
-check_true("命中缓存（不打网络）", data is not None and data["src"] == "test")
+check_true("命中缓存（不打网络）", data is not None and data["src"] == "open.er-api.com")
 check("缓存里的汇率可用", round(data["rates"]["CNY"], 2), 7.12)
 
 print(u"── 8. known_codes / 建议")
@@ -214,11 +214,12 @@ check_true("流行表外的按字母", allc == sorted(allc, key=lambda c: (
 print(u"── 13. 多币种排版输出（_fmt_multi）")
 tmpd = tempfile.mkdtemp()
 fx.SETTINGS_FILE = os.path.join(tmpd, "fx_settings.json")
-st = {"target": "CNY", "display": ["USD", "EUR", "JPY"], "apis": [], "active_api": ""}
+st = {"target": "CNY", "display": ["USD", "EUR", "JPY"], "source": "erapi",
+      "crypto_on": True}
 with open(fx.SETTINGS_FILE, "w") as f:
     json.dump(st, f)
 from modules import fx as fx_mod
-text, multi = fx_mod._fmt_multi(22, "CNY", {"rates": RATES, "src": "test"})
+text, multi = fx_mod._fmt_multi(22, "CNY", {"rates": RATES, "src": "open.er-api.com"})
 check_true("返回多币种", multi)
 check_true("pre 等宽块 + 源标注", text.startswith("<pre>")
            and text.endswith("</pre>") and "open.er-api.com" in text)
@@ -228,7 +229,7 @@ check_true("源币种不出现在展示里", "USD（CNY" not in text)
 st["display"] = ["CNY"]
 with open(fx.SETTINGS_FILE, "w") as f:
     json.dump(st, f)
-text2, multi2 = fx_mod._fmt_multi(22, "CNY", {"rates": RATES, "src": "test"})
+text2, multi2 = fx_mod._fmt_multi(22, "CNY", {"rates": RATES, "src": "open.er-api.com"})
 check_true("源币=展示币时回落单出", not multi2)
 
 print(u"── 15. 货币识别（直接输入选择）")
