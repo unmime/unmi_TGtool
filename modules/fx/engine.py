@@ -544,9 +544,10 @@ def parse_query_ex(text):
     country_hit = any(c in low for c in _COUNTRY_NAME)
     pinyin_hit = any(p in low for p in _PINYIN)
     iso_hit = any(p in low for p in _ISO_CC)
-    # 加密黑话（大饼/二饼…）按别名算：开开关时 "1大饼" 直接响应
-    crypto_hit = get_settings().get("crypto_on") and any(
-        s_ in low for s_ in CRYPTO_ALIASES)
+    # 加密黑话/代码都按别名算：开开关时 "1大饼"、"1btc"、"btc" 直接响应
+    crypto_hit = get_settings().get("crypto_on") and (
+        any(s_ in low for s_ in CRYPTO_ALIASES) or
+        any(c.lower() in low for c in CRYPTO_NAMES))
     used_alias = cur_hit or crypto_hit or (
         (country_hit or pinyin_hit or iso_hit) and number is not None)
     # 多币种：第 1 个是源，其余全是目标（"1mjrbxjpcny" → 1 USD → JPY/SGD/CNY）
