@@ -54,6 +54,13 @@ _TYPEIN_GUIDE = (
     u"认出来的自动勾选，没认出来的会告诉你。\n"
     u"发「取消」退出")
 
+_TYPEINC_GUIDE = (
+    u"🪙 <b>输入加密货币</b>\n\n"
+    u"把加密货币名发给我：\n"
+    u"<code>比特币 以太坊 狗狗币</code>\n"
+    u"<code>btc eth doge</code>\n\n"
+    u"认出来的自动勾选进展示货币。发「取消」退出")
+
 
 # ---------------------------------------------------------------- 按钮标签
 def _tag(label, selected):
@@ -109,6 +116,8 @@ def _menu_main():
          {"text": u"🔌 汇率源 ▸", "callback_data": "%s:api:open" % _CB}],
         [{"text": u"🪙 加密货币换算：%s" % (u"🟢 开" if st["crypto_on"] else u"⚪ 关"),
           "callback_data": "%s:cryptotoggle" % _CB}],
+        [{"text": u"🪙 输入加密货币关键字添加转换货币",
+          "callback_data": "%s:cur:typeinc:0" % _CB}],
         [{"text": u"🔄 刷新汇率", "callback_data": "%s:refresh" % _CB},
          {"text": u"❌ 收起", "callback_data": "%s:close" % _CB}],
     ]
@@ -303,14 +312,14 @@ class Plugin(Module):
     # ------------------------------------------------------------- 消息
     def on_message(self, text, chat_id):
         if chat_id in _PENDING_TYPEIN:
+            mode = _PENDING_TYPEIN.get(chat_id) or "fiat"
             # 带金额的合法换算式优先走换算（向导只是选币，别吞掉正经查询）。
-            # 判据：文本含数字 且 能解析出币种。纯名字（"美元 日元"）仍归向导。
             if re.search(r"[0-9]", text):
                 q = fx.parse_query_ex(text)
                 if q and q["frm"]:
                     self._reply(q["amount"], q["frm"], q["to"], text, q["expr"])
                     return True                  # 向导状态保留，选币继续有效
-            self._handle_typein_wizard(text, chat_id)
+            self._handle_typein_wizard(text, chat_id, mode)
             return True
         if len(text) > 32:
             return False
@@ -430,10 +439,23 @@ class Plugin(Module):
             self.ctx.answer(cb_id, u"✅ 展示货币已重置为默认")
             return True
         if action == "cur" and len(parts) >= 3 and parts[2] == "typein":
-            _PENDING_TYPEIN[chat_id] = True
+            _PENDING_TYPEIN[chat_id] = "fiat"
             self.ctx.edit(chat_id, message_id, _TYPEIN_GUIDE,
                           [[{"text": u"❌ 取消", "callback_data": "%s:open" % _CB}]])
             self.ctx.answer(cb_id, u"把货币/国家名发给我")
+            return True
+        if action == "cur" and len(parts) >= 3 and parts[2] == "typeinc":
+            if not st["crypto_on"]:
+                self.ctx.edit(chat_id, message_id,
+                              u"🪙 加密货币换算当前是关闭的，开启后就能添加",
+                              [[{"text": u"🪙 一键开启加密货币换算",
+                                 "callback_data": "%s:cryptoon" % _CB}]])
+                self.ctx.answer(cb_id, u"先开启加密货币换算")
+                return True
+            _PENDING_TYPEIN[chat_id] = "crypto"
+            self.ctx.edit(chat_id, message_id, _TYPEINC_GUIDE,
+                          [[{"text": u"❌ 取消", "callback_data": "%s:open" % _CB}]])
+            self.ctx.answer(cb_id, u"把加密货币名发给我")
             return True
         if action == "cur" and len(parts) >= 4 and parts[2] == "clear":
             st["display"] = []
@@ -471,19 +493,32 @@ class Plugin(Module):
 
 
     # ------------------------------------------------------------- 向导
-    def _handle_typein_wizard(self, text, chat_id):
+    def _handle_typein_wizard(self, text, chat_id, mode="fiat"):
         raw = text.strip()
         if raw in (u"取消", "/fx", "/cancel"):
             _PENDING_TYPEIN.pop(chat_id, None)
             self.ctx.send(u"已取消。/fx 回菜单")
             return
         found, not_found, fuzzy_hits = fx.recognize(raw)
+        if mode == "crypto":
+            # 加密向导：只认加密货币，法币候选一律不收
+            found = [c for c in found if c in fx.CRYPTO_NAMES]
+            fuzzy_hits = [(t, c, p) for t, c, p in fuzzy_hits
+                          if c in fx.CRYPTO_NAMES]
+            if not fx.get_settings().get("crypto_on"):
+                _PENDING_TYPEIN.pop(chat_id, None)
+                self.ctx.send(u"🪙 加密货币换算当前是关闭的，点下面按钮打开后重发即可",
+                              buttons=[[{"text": u"🪙 一键开启加密货币换算",
+                                         "callback_data": "%s:cryptoon" % _CB}]])
+                return
         if not found:
+            tip = (u"<code>比特币 以太坊 狗狗币</code>" if mode == "crypto"
+                   else u"<code>美金 人民币 日元 澳大利亚</code>")
             self.ctx.send(
                 u"⚠️ 一个都没认出来%s\n"
-                u"试试这样写：<code>美金 人民币 日元 澳大利亚</code>\n"
+                u"试试这样写：%s\n"
                 u"重发一次，或发「取消」退出" % (
-                    u"（%s）" % u"、".join(not_found[:5]) if not_found else ""))
+                    u"（%s）" % u"、".join(not_found[:5]) if not_found else "", tip))
             return
         st = fx.get_settings()
         disp = set(st["display"])
