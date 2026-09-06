@@ -173,7 +173,8 @@ def _menu_api():
     st = fx.get_settings()
     cur = st["source"]
     csrc = st.get("crypto_source", "binance")
-    lines = [u"💵 <b>汇率源</b>（免费源，点一个切换）", ""]
+    fiat_title = u"💵 <b>汇率源</b>（免费源，点一个切换）"
+    lines = [fiat_title, _divider(fiat_title)]
     kb = []
     for a in fx.BUILTIN_APIS:
         on = a["id"] == cur
@@ -182,7 +183,8 @@ def _menu_api():
         kb.append([{"text": _tag(u"💵 %s 💵" % a["name"], on),
                     "callback_data": "%s:api:use:%s" % (_CB, a["id"])}])
     lines.append(u"")
-    lines.append(u"🪙 <b>加密货币源</b>（实时价，点一个切换）")
+    csrc_title = u"🪙 <b>加密货币源</b>（实时价，点一个切换）"
+    lines += [csrc_title, _divider(csrc_title)]
     for a in fx.CRYPTO_SOURCES:
         on = a["id"] == csrc
         lines.append(u"%s <b>🪙 %s 🪙</b> — %s"
