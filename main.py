@@ -253,9 +253,12 @@ class Dispatcher(object):
         for mid, meta in _MODULE_CATALOG.items():
             installed = _mod_installed(mid)
             enabled = installed and mid in self.cfg.enabled
-            if installed:
-                mark = u"🟢" if enabled else u"⏸"
+            if enabled:
+                mark = u"🟢"
                 act = {"text": u"🗑 卸载", "callback_data": "modmgr:askun:%s" % mid}
+            elif installed:
+                mark = u"⏸"
+                act = {"text": u"➕ 启用", "callback_data": "modmgr:install:%s" % mid}
             else:
                 mark = u"⬇"
                 act = {"text": u"⬇ 安装", "callback_data": "modmgr:install:%s" % mid}
@@ -321,19 +324,20 @@ class Dispatcher(object):
             return
 
         if action == "install":
-            self.ctx.answer(cb_id, u"⬇ 正在从仓库拉取…")
-            err = _download_module(mid)
-            if err:
-                self.ctx.answer(cb_id, u"⚠️ 安装失败")
-                self.ctx.send(u"⚠️ 安装「%s」失败：%s" % (meta.get("title", mid), err))
-                return
+            if not _mod_installed(mid):
+                self.ctx.answer(cb_id, u"⬇ 正在从仓库拉取…")
+                err = _download_module(mid)
+                if err:
+                    self.ctx.answer(cb_id, u"⚠️ 安装失败")
+                    self.ctx.send(u"⚠️ 安装「%s」失败：%s" % (meta.get("title", mid), err))
+                    return
             if mid not in self.cfg.enabled:
                 self.cfg.save_enabled(self.cfg.enabled + [mid])
             self._reload_modules()
             self.ctx.edit(chat_id, message_id,
-                          u"✅ 已安装「%s」并启用" % meta.get("title", mid),
+                          u"✅ 已启用「%s」" % meta.get("title", mid),
                           self._modules_kb())
-            self.ctx.answer(cb_id, u"✅ 已安装")
+            self.ctx.answer(cb_id, u"✅ 已启用")
             return
 
         self.ctx.answer(cb_id, u"未知操作")
