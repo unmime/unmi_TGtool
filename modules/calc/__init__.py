@@ -40,6 +40,9 @@ class Plugin(Module):
         # is_cont_input 识别连续计算（+3 *2 /0，长度可能只有 2 位），
         # looks_like_expr 识别普通算式（要求长度 ≥3），两者都要查。
         # 只用 looks_like_expr 会把 +3 这类短输入漏掉 —— 它的长度检查在前面。
+        # 裸纯数字（656 / 1,500）：静默记录 ans，不回复（等补运算符或币种）
+        if calc_core.store_ans_silent(text):
+            return True
         if not (calc_core.is_cont_input(text) or calc_core.looks_like_expr(text)):
             return False
         try:

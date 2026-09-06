@@ -192,6 +192,24 @@ def _is_cont_input(text):
     return False
 
 
+def store_ans_silent(raw):
+    """裸纯数字输入（656 / 1,500 / 3.14）：静默记录 ans，不回复。
+
+    供用户「先输数字 → 再补运算符（+56）或币种（mj）」的场景。
+    返回 True=已记录。
+    """
+    s = _normalize(raw)
+    if not re.fullmatch(r"\d{1,3}(?:,\d{3})*(?:\.\d+)?|\d+(?:\.\d+)?", s):
+        return False
+    try:
+        import ast
+        tree = ast.parse(s, mode="eval")
+        set_ans(_eval(tree, 0))
+        return True
+    except Exception:                       # noqa: BLE001
+        return False
+
+
 def looks_like_expr(text):
     """判断这条消息是否应当被当作算式处理。保守判定，避免误伤 IP、普通聊天。"""
     s = _normalize(text)
