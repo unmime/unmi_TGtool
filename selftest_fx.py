@@ -255,11 +255,14 @@ check("火星币（真不认识）", fx.recognize(u"火星币")[0], [])
 print(u"── 18. 计算器联动")
 check("calc_value 1+1", fx.calc_value("1+1"), 2)
 check("1+1mj", fx.parse_query_ex("1+1mj"),
-      {"amount": 2.0, "frm": "USD", "to": None, "used_alias": True, "expr": "1+1"})
+      {"amount": 2.0, "frm": "USD", "to": None, "used_alias": True, "expr": "1+1",
+       "has_amount": True})
 check("100*2usd eur", fx.parse_query_ex("100*2usd eur"),
-      {"amount": 200.0, "frm": "USD", "to": "EUR", "used_alias": True, "expr": "100*2"})
+      {"amount": 200.0, "frm": "USD", "to": "EUR", "used_alias": True, "expr": "100*2",
+       "has_amount": True})
 check("(50+50)人民币", fx.parse_query_ex(u"(50+50)人民币"),
-      {"amount": 100.0, "frm": "CNY", "to": None, "used_alias": True, "expr": "(50+50)"})
+      {"amount": 100.0, "frm": "CNY", "to": None, "used_alias": True, "expr": "(50+50)",
+       "has_amount": True})
 check("纯数字 expr=None", fx.parse_query_ex("100美元")["expr"], None)
 check("坏算式不崩", fx.parse_query_ex("(1+usd"), None)
 

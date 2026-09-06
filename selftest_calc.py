@@ -126,6 +126,7 @@ def main():
         expect_err(u"畸形 %r" % bad[:24], calc.format_result, bad)
 
     print("[5b] 看似畸形但数学上合法，应正常求值")
+    calc.set_ans(0)        # --5 是续算输入（ans--5），ans=0 时结果恰为 5
     check(u"--5 = 5", calc.format_result("--5").split("\n")[0],
           "<code>--5=5</code>｜<code>5</code>｜")
     check(u"1+++2 = 3", calc.format_result("1+++2").split("\n")[0],

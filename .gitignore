@@ -7,8 +7,7 @@ calc_settings.json
 *.env
 .env
 
+# 编辑器 / 系统
 .DS_Store
 .idea/
 .vscode/
-.DS_Store
-.DS_Store

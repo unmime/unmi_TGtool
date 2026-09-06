@@ -248,30 +248,30 @@ class Dispatcher(object):
 
     # ------------------------------------------------------------- 模块管理
     def _modules_kb(self):
-        """模块管理按钮：按目录列全部模块，已装的给「卸载」，未装的给「安装」。"""
+        """模块管理按钮：点名字=暂停/启用，➕➖=安装/卸载。"""
         kb = []
         for mid, meta in _MODULE_CATALOG.items():
             installed = _mod_installed(mid)
             enabled = installed and mid in self.cfg.enabled
-            if enabled:
-                mark = u"🟢"
-                act = {"text": u"🗑 卸载", "callback_data": "modmgr:askun:%s" % mid}
-            elif installed:
-                mark = u"⏸"
-                act = {"text": u"➕ 启用", "callback_data": "modmgr:install:%s" % mid}
+            if installed:
+                mark = u"🟢" if enabled else u"⏸"
+                name_cb = "modmgr:toggle:%s" % mid       # 点名字 = 暂停/启用
+                act = {"text": u"➖ 卸载", "callback_data": "modmgr:askun:%s" % mid}
             else:
-                mark = u"⬇"
-                act = {"text": u"⬇ 安装", "callback_data": "modmgr:install:%s" % mid}
+                mark = u"🔴"
+                name_cb = "modmgr:info:%s" % mid
+                act = {"text": u"➕ 安装", "callback_data": "modmgr:install:%s" % mid}
             kb.append([{"text": u"%s %s" % (mark, meta["title"]),
-                        "callback_data": "modmgr:info:%s" % mid}, act])
+                        "callback_data": name_cb}, act])
         kb.append([{"text": u"❌ 收起", "callback_data": "modmgr:close"}])
         return kb
+
 
     def _modules_menu(self):
         """/modules —— 模块安装/卸载面板。"""
         text = (u"🧩 <b>模块管理</b>\n\n"
-                u"🟢 在用 · ⏸ 已装未启用 · ⬇ 可下载\n"
-                u"卸载会删掉代码和配置；安装从仓库拉取。")
+                u"🟢 在用 · ⏸ 暂停 · 🔴 未安装\n"
+                u"点模块名 暂停/启用 · ➕➖ 安装/卸载（卸载删代码和配置）。")
         self.ctx.send(text, buttons=self._modules_kb())
 
     def _modmgr_callback(self, data, cb_id, message):
@@ -289,8 +289,8 @@ class Dispatcher(object):
 
         if action == "open":
             text = (u"🧩 <b>模块管理</b>\n\n"
-                    u"🟢 在用 · ⏸ 已装未启用 · ⬇ 可下载\n"
-                    u"卸载会删掉代码和配置；安装从仓库拉取。")
+                    u"🟢 在用 · ⏸ 暂停 · 🔴 未安装\n"
+                    u"点模块名 暂停/启用 · ➕➖ 安装/卸载（卸载删代码和配置）。")
             self.ctx.edit(chat_id, message_id, text, self._modules_kb())
             self.ctx.answer(cb_id, "")
             return
@@ -302,6 +302,26 @@ class Dispatcher(object):
                         r["name"], r["version"], r["description"] or u"（无描述）"))
                     return
             self.ctx.answer(cb_id, u"%s（未安装）" % meta.get("title", mid))
+            return
+
+        if action == "toggle":
+            if not _mod_installed(mid):
+                self.ctx.answer(cb_id, u"未安装，点 ➕ 安装")
+                return
+            enabled = list(self.cfg.enabled)
+            if mid in enabled:
+                enabled.remove(mid)
+                note = u"⏸ 已暂停「%s」" % meta.get("title", mid)
+            else:
+                enabled.append(mid)
+                note = u"🟢 已启用「%s」" % meta.get("title", mid)
+            self.cfg.save_enabled(enabled)
+            self._reload_modules()
+            text = (u"🧩 <b>模块管理</b>\n\n"
+                    u"🟢 在用 · ⏸ 暂停 · 🔴 未安装\n"
+                    u"点模块名 暂停/启用 · ➕➖ 安装/卸载（卸载删代码和配置）。")
+            self.ctx.edit(chat_id, message_id, text, self._modules_kb())
+            self.ctx.answer(cb_id, note)
             return
 
         if action == "askun":
