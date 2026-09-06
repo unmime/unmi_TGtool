@@ -294,12 +294,22 @@ def _fmt_targets(amount, frm, targets, data, expr=None):
             fx.fmt_amt(amount), fx.unit(frm))
     lines = [head, _divider(head)]
     top_div = lines[-1]                 # 底部分割线与顶部同长
+    # 列对齐：名称/代码补齐到本块最宽（名称用全角空格，代码用半角）
+    name_w = max((_disp_width(fx.cn_name(c)) for c in targets), default=0)
+    code_w = max((len(c) for c in targets), default=0)
+
+    def _pad_name(name):
+        pad = name_w - _disp_width(name)
+        return name + u"　" * (pad // 2) + u" " * (pad % 2)
+
     for c in targets:
         out = fx.convert(amount, frm, c, rates)
         fl = fx.flag(c)
+        name = _pad_name(fx.cn_name(c))
+        code = c + u" " * (code_w - len(c))
         lines.append(u"   %s %s%s <code>%s%s</code>" % (
-            fl or u"　", fx.cn_name(c),
-            u"（%s）" % c if fx.cn_name(c) != c else "",
+            fl or u"　", name,
+            u"（%s）" % code if fx.cn_name(c) != c else "",
             fx.fmt_amt(out), fx.unit(c)))
     lines.append(top_div)
     lines.append(u"<i>%s</i>" % data["src"])
