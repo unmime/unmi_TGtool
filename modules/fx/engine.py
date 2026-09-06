@@ -53,7 +53,15 @@ CRYPTO_NAMES = {
     "TRX": u"波场币", "DOT": u"波卡币", "LTC": u"莱特币", "AVAX": u"雪崩币",
     "LINK": u"链环币", "SHIB": u"柴犬币", "TON": u"Toncoin",
 }
-_CRYPTO_API = BUILTIN_APIS[2]        # jsdelivr 那个源，兼作加密货币数据源
+_CRYPTO_API = BUILTIN_APIS[2]        # jsdelivr 那个源，兼作加密货币日线数据源
+
+# 加密货币源（用户手动选，不再自动择链）
+CRYPTO_SOURCES = [
+    {"id": "binance", "name": "Binance", "desc": u"实时 · 币安公开数据"},
+    {"id": "okx", "name": "OKX", "desc": u"实时 · 交易所行情"},
+    {"id": "currency-api", "name": "currency-api", "desc": u"每日更新 · CDN"},
+]
+_DEFAULT_CRYPTO_SOURCE = "binance"
 
 # ISO 4217 全表：货币代码 → (国家码, 中文名)。
 # 国旗按 ISO 3166 国家码自动生成（两位国家码 → 区域指示符），不用手维护。
@@ -263,6 +271,8 @@ def get_settings():
         "source": d.get("source", _DEFAULT_SOURCE),
         # 加密货币换算开关（v3.1）：默认关（不是人人都需要）
         "crypto_on": bool(d.get("crypto_on", False)),
+        # 加密货币源（v3.1）：用户手动选
+        "crypto_source": d.get("crypto_source", _DEFAULT_CRYPTO_SOURCE),
     }
 
 
@@ -338,47 +348,44 @@ def _http_json(url, timeout=10):
         return json.load(r)
 
 
-def _crypto_realtime():
-    """实时加密价 {CODE: 1 CRYPTO = ? USDT}。链：binance.vision → OKX → None。"""
+def _crypto_binance():
+    """Binance 公开数据端点（无地域限制）：{CODE: USDT价}。"""
     syms = ["%sUSDT" % c for c in CRYPTO_NAMES if c != "USDT"]
-    # 1) binance.vision（币安公开数据端点，无地域限制，直连）
-    try:
-        q = urllib.parse.quote(json.dumps(syms, separators=(",", ":")))
-        d = _http_json("https://data-api.binance.vision/api/v3/ticker/price?symbols=" + q)
-        out = {r["symbol"][:-4]: float(r["price"]) for r in d if r.get("price")}
-        if out:
-            return out
-    except Exception:                   # noqa: BLE001
-        pass
-    # 2) OKX 全 SPOT 过滤（广州直连通常被墙，作备用链）
-    try:
-        d = _http_json("https://www.okx.com/api/v5/market/tickers?instType=SPOT", timeout=15)
-        want = {"%s-USDT" % c for c in CRYPTO_NAMES if c != "USDT"}
-        out = {t["instId"][:-5]: float(t["last"])
-               for t in d.get("data", []) if t.get("instId") in want}
-        if out:
-            return out
-    except Exception:                   # noqa: BLE001
-        pass
-    return None
+    q = urllib.parse.quote(json.dumps(syms, separators=(",", ":")))
+    d = _http_json("https://data-api.binance.vision/api/v3/ticker/price?symbols=" + q)
+    return {r["symbol"][:-4]: float(r["price"]) for r in d if r.get("price")}
+
+
+def _crypto_okx():
+    """OKX 全 SPOT 过滤：{CODE: USDT价}。"""
+    d = _http_json("https://www.okx.com/api/v5/market/tickers?instType=SPOT", timeout=15)
+    want = {"%s-USDT" % c for c in CRYPTO_NAMES if c != "USDT"}
+    return {t["instId"][:-5]: float(t["last"])
+            for t in d.get("data", []) if t.get("instId") in want}
 
 
 def _crypto_rates():
-    """{CODE: 1 USD = ? CRYPTO}，5 分钟独立缓存。
-    链：实时（binance.vision → OKX，USDT≈USD 折算）→ currency-api 日线回落。"""
+    """{CODE: 1 USD = ? CRYPTO}，5 分钟独立缓存。只用户选中的那个源（不自动择链）。"""
     cache = _read_json(CRYPTO_CACHE_FILE)
     if cache and time.time() - cache.get("fetched_at", 0) < CRYPTO_TTL \
             and isinstance(cache.get("rates"), dict):
         return cache["rates"]
+    src = get_settings().get("crypto_source", _DEFAULT_CRYPTO_SOURCE)
     out = None
-    rt = _crypto_realtime()
-    if rt:
-        out = {code: 1.0 / p for code, p in rt.items() if p > 0}
-        out["USDT"] = 1.0               # USDT≈USD
-    else:
-        data = _fetch_source(_CRYPTO_API)       # 日线回落（currency-api）
+    if src == "okx":
+        rt = _crypto_okx()
+        if rt:
+            out = {c: 1.0 / p for c, p in rt.items() if p > 0}
+            out["USDT"] = 1.0               # USDT≈USD
+    elif src == "currency-api":
+        data = _fetch_source(_CRYPTO_API)
         if data:
             out = {c: data["rates"][c] for c in CRYPTO_NAMES if c in data["rates"]}
+    else:                                   # binance（默认）
+        rt = _crypto_binance()
+        if rt:
+            out = {c: 1.0 / p for c, p in rt.items() if p > 0}
+            out["USDT"] = 1.0
     if out:
         try:
             with open(CRYPTO_CACHE_FILE, "w") as f:

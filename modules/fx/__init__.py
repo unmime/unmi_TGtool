@@ -102,9 +102,9 @@ def _menu_main():
         u"%s" % (
             disp_txt, fx.cn_name(st["target"]), st["target"], src, crypto_line))
     kb = [
-        [{"text": u"🪙 展示货币 ▸", "callback_data": "%s:cur:page:0" % _CB}],
-        [{"text": u"✏️ 输入货币关键字添加转换货币",
+        [{"text": u"➕ 添加法定货币",
           "callback_data": "%s:cur:typein:0" % _CB}],
+        [{"text": u"🔄 重置展示货币", "callback_data": "%s:cur:reset" % _CB}],
         [{"text": u"🎯 默认目标 ▸", "callback_data": "%s:tgt:page:0" % _CB},
          {"text": u"🔌 汇率源 ▸", "callback_data": "%s:api:open" % _CB}],
         [{"text": u"🪙 加密货币换算：%s" % (u"🟢 开" if st["crypto_on"] else u"⚪ 关"),
@@ -134,7 +134,7 @@ def _menu_picker(kind, page):
             sel_txt = u"还没勾选 —— 勾几个常用的，比如 🇺🇸美元 🇯🇵日元 🇭🇰港币"
     else:
         selected = {st["target"]}
-        title = u"🎯 <b>默认目标币</b>（选一个，未指定目标时按它换算）"
+        title = u"🎯 <b>默认目标币</b>"
         sel_txt = u"当前：%s（%s）" % (fx.cn_name(st["target"]), st["target"])
     text = u"%s\n%s\n<i>第 %d/%d 页 · 点币种%s</i>" % (
         title, sel_txt, page + 1, total,
@@ -162,15 +162,37 @@ def _menu_picker(kind, page):
 def _menu_api():
     st = fx.get_settings()
     cur = st["source"]
+    csrc = st.get("crypto_source", "binance")
+    csrc_name = next((a["name"] for a in fx.CRYPTO_SOURCES if a["id"] == csrc),
+                     csrc)
     lines = [u"🔌 <b>汇率源</b>（免费源，点一个切换）", ""]
     kb = []
     for a in fx.BUILTIN_APIS:
         on = a["id"] == cur
-        lines.append(u"%s <b>%s</b> — %s" % (u"🟢" if on else u"⚪", a["name"], a["desc"]))
-        kb.append([{"text": _tag(a["name"], on),
+        lines.append(u"%s <b>💵 %s 💵</b> — %s"
+                     % (u"🟢" if on else u"⚪", a["name"], a["desc"]))
+        kb.append([{"text": _tag(u"💵 %s 💵" % a["name"], on),
                     "callback_data": "%s:api:use:%s" % (_CB, a["id"])}])
     lines.append(u"")
-    lines.append(u"🪙 加密货币（实时价，自动择源）：<b>Binance</b> → OKX → currency-api")
+    lines.append(u"🪙 加密货币源：%s" % csrc_name)
+    kb.append([{"text": u"🪙 加密货币源 ▸",
+                "callback_data": "%s:csrc:open" % _CB}])
+    kb.append(_BACK_CLOSE)
+    return u"\n".join(lines), kb
+
+
+def _menu_csrc():
+    """加密货币源选择页（🪙 标识）。"""
+    st = fx.get_settings()
+    cur = st.get("crypto_source", "binance")
+    lines = [u"🪙 <b>加密货币源</b>（点一个切换）", ""]
+    kb = []
+    for a in fx.CRYPTO_SOURCES:
+        on = a["id"] == cur
+        lines.append(u"%s <b>🪙 %s 🪙</b> — %s"
+                     % (u"🟢" if on else u"⚪", a["name"], a["desc"]))
+        kb.append([{"text": _tag(u"🪙 %s 🪙" % a["name"], on),
+                    "callback_data": "%s:csrc:use:%s" % (_CB, a["id"])}])
     kb.append(_BACK_CLOSE)
     return u"\n".join(lines), kb
 
@@ -353,6 +375,25 @@ class Plugin(Module):
             self.ctx.answer(cb_id, u"🪙 加密货币换算已开启" if st["crypto_on"]
                             else u"加密货币换算已关闭")
             return True
+        if action == "csrc" and len(parts) >= 3:
+            sub = parts[2]
+            if sub == "open":
+                t, kb = _menu_csrc()
+                self.ctx.edit(chat_id, message_id, t, kb)
+                self.ctx.answer(cb_id, "")
+                return True
+            if sub == "use" and len(parts) >= 4:
+                src = parts[3]
+                if not any(a["id"] == src for a in fx.CRYPTO_SOURCES):
+                    self.ctx.answer(cb_id, u"⚠️ 这个源不存在")
+                    return True
+                st["crypto_source"] = src
+                fx.save_settings(st)
+                fx.load_rates(force=True)
+                t, kb = _menu_csrc()
+                self.ctx.edit(chat_id, message_id, t, kb)
+                self.ctx.answer(cb_id, u"✅ 加密货币源已切换")
+                return True
         if action == "refresh":
             data = fx.load_rates(force=True)
             t, kb = _menu_main()
@@ -380,6 +421,13 @@ class Plugin(Module):
             t, kb = _menu_picker("cur", page)
             self.ctx.edit(chat_id, message_id, t, kb)
             self.ctx.answer(cb_id, u"已更新")
+            return True
+        if action == "cur" and len(parts) >= 3 and parts[2] == "reset":
+            st["display"] = list(fx._DEFAULT_DISPLAY)
+            fx.save_settings(st)
+            t, kb = _menu_main()
+            self.ctx.edit(chat_id, message_id, t, kb)
+            self.ctx.answer(cb_id, u"✅ 展示货币已重置为默认")
             return True
         if action == "cur" and len(parts) >= 3 and parts[2] == "typein":
             _PENDING_TYPEIN[chat_id] = True
