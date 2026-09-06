@@ -52,14 +52,15 @@ _TYPEIN_GUIDE = (
     u"<code>美金人民币日元澳大利亚印度</code>\n"
     u"<code>usd eur 日本 澳洲</code>\n\n"
     u"认出来的自动勾选，没认出来的会告诉你。\n"
-    u"发「取消」退出")
+    u"可以连续输入多个；发「取消」或点「✔ 完成」结束")
 
 _TYPEINC_GUIDE = (
     u"🪙 <b>输入加密货币</b>\n\n"
     u"把加密货币名发给我：\n"
     u"<code>比特币 以太坊 狗狗币</code>\n"
     u"<code>btc eth doge</code>\n\n"
-    u"认出来的自动勾选进展示货币。发「取消」退出")
+    u"认出来的自动勾选进展示货币，可以连续输入多个。\n"
+    u"发「取消」或点「✔ 完成」结束")
 
 
 # ---------------------------------------------------------------- 按钮标签
@@ -368,6 +369,12 @@ class Plugin(Module):
                           u"再发一次刚才的换算就行")
             self.ctx.answer(cb_id, u"🪙 已开启")
             return True
+        if action == "wizdone":
+            _PENDING_TYPEIN.pop(chat_id, None)
+            t, kb = _menu_main()
+            self.ctx.edit(chat_id, message_id, t, kb)
+            self.ctx.answer(cb_id, u"✅ 完成")
+            return True
         if action == "cryptotoggle":
             st["crypto_on"] = not st.get("crypto_on", False)
             if not st["crypto_on"]:
@@ -518,8 +525,8 @@ class Plugin(Module):
         disp.extend(newly)          # 保持用户添加顺序：原有的在前，新的按输入顺序在后
         st[key] = disp
         fx.save_settings(st)
-        _PENDING_TYPEIN.pop(chat_id, None)
-        lines = [u"✅ <b>已识别并勾选 %d 种</b>：" % len(found)]
+        # 向导保持激活：用户可以继续输入添加，直到点「✔ 完成」或「取消」
+        lines = [u"✅ <b>已识别并勾选 %d 种</b>（可继续输入）：" % len(found)]
         if fuzzy_hits:
             fuzzy_txt = u"、".join(u"%s→%s" % (t, c) for t, c, _p in fuzzy_hits[:5])
             lines.append(u"🔍 模糊匹配：%s" % fuzzy_txt)
@@ -531,10 +538,11 @@ class Plugin(Module):
                          else u"")
         if not_found:
             lines.append(u"⚠️ 没认出：%s" % u"、".join(not_found[:6]))
+        lines.append(u"➕ 可以继续输入添加，点「✔ 完成」结束")
         self.ctx.send(u"\n".join(lines),
                       buttons=[[{"text": u"🪙 查看展示货币",
                                  "callback_data": "%s:cur:page:0" % _CB},
-                                {"text": u"✔ 完成", "callback_data": "%s:open" % _CB}]])
+                                {"text": u"✔ 完成", "callback_data": "%s:wizdone" % _CB}]])
 
 
     # ------------------------------------------------------------- 命令
