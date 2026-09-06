@@ -348,6 +348,7 @@ class Plugin(Module):
             self.ctx.answer(cb_id, u"已收起")
             return True
         if action == "open":
+            _PENDING_TYPEIN.pop(chat_id, None)
             t, kb = _menu_main()
             self.ctx.edit(chat_id, message_id, t, kb)
             self.ctx.answer(cb_id, u"已更新")
@@ -439,7 +440,8 @@ class Plugin(Module):
         if action == "cur" and len(parts) >= 3 and parts[2] == "typein":
             _PENDING_TYPEIN[chat_id] = "fiat"
             self.ctx.edit(chat_id, message_id, _TYPEIN_GUIDE,
-                          [[{"text": u"❌ 取消", "callback_data": "%s:open" % _CB}]])
+                          [[{"text": u"✔ 完成", "callback_data": "%s:wizdone" % _CB},
+                            {"text": u"❌ 取消", "callback_data": "%s:open" % _CB}]])
             self.ctx.answer(cb_id, u"把货币/国家名发给我")
             return True
         if action == "cur" and len(parts) >= 3 and parts[2] == "typeinc":
@@ -452,7 +454,8 @@ class Plugin(Module):
                 return True
             _PENDING_TYPEIN[chat_id] = "crypto"
             self.ctx.edit(chat_id, message_id, _TYPEINC_GUIDE,
-                          [[{"text": u"❌ 取消", "callback_data": "%s:open" % _CB}]])
+                          [[{"text": u"✔ 完成", "callback_data": "%s:wizdone" % _CB},
+                            {"text": u"❌ 取消", "callback_data": "%s:open" % _CB}]])
             self.ctx.answer(cb_id, u"把加密货币名发给我")
             return True
         if action == "cur" and len(parts) >= 4 and parts[2] == "clear":
@@ -515,8 +518,10 @@ class Plugin(Module):
             self.ctx.send(
                 u"⚠️ 一个都没认出来%s\n"
                 u"试试这样写：%s\n"
-                u"重发一次，或发「取消」退出" % (
-                    u"（%s）" % u"、".join(not_found[:5]) if not_found else "", tip))
+                u"重发一次，或用下面的按钮" % (
+                    u"（%s）" % u"、".join(not_found[:5]) if not_found else "", tip),
+                buttons=[[{"text": u"✔ 完成", "callback_data": "%s:wizdone" % _CB},
+                          {"text": u"❌ 取消", "callback_data": "%s:open" % _CB}]])
             return
         st = fx.get_settings()
         key = "display_crypto" if mode == "crypto" else "display"
