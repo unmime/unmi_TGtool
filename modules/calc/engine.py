@@ -936,8 +936,8 @@ def calc_msgs(raw):
     value = _eval(tree, 0)
     text, approx = format_value(value)
     st = get_settings()
-    if st.get("ans_on"):
-        set_ans(value)              # 连续计算开启时才记录上一次结果
+    set_ans(value)                  # 始终记录（汇率模块的「算式后补币种」联动依赖；
+                                    #   ans_on 只控制 +3 这类连续计算输入是否生效）
     # 结果主体：三种显示格式（都做成可点击复制的独立 code 区块）
     fmt = st["fmt"]
     if fmt == "result":                          # 仅显示结果
