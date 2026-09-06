@@ -214,7 +214,8 @@ _ALIAS_SORTED = sorted(_ALIASES, key=len, reverse=True)
 _ALIAS_CODES = set(_ALIASES.values())
 
 _FULLWIDTH = {ord(f): ord(t) for f, t in zip(u"０１２３４５６７８９．，", u"0123456789.,")}
-_SEP_RE = re.compile(u"[换到至→=／/ ]+")     # 分隔词统一当空格
+_SEP_RE = re.compile(u"[换到至→= ]+")         # 分隔词统一当空格（/ 除外：除法要用）
+# / 和 ／ 只在独立成 token 时当分隔符（"usd/cny"），夹数字里的是除法（"66*9/8"）
 
 _CACHE_FILE = ""          # 由框架侧指向 DATA_DIR/fx_rates.json
 SETTINGS_FILE = ""        # 由框架侧指向 DATA_DIR/fx_settings.json
@@ -406,6 +407,8 @@ def parse_query_ex(text):
             codes.append(tok.upper())
         elif tok in (u"元", u"圆"):
             continue                        # 「新加坡元」里剩下的单位后缀
+        elif tok in ("/", u"／"):
+            continue                        # 独立分隔符（usd/cny）；除法在算式 token 里不受影响
         else:
             return None                     # 4+ 字母的词（如 again）→ 不是汇率查询
     amount = number if number is not None else 1.0
