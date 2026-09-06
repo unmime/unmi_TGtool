@@ -55,6 +55,13 @@ CRYPTO_NAMES = {
 }
 _CRYPTO_API = BUILTIN_APIS[2]        # jsdelivr 那个源，兼作加密货币日线数据源
 
+# 行业黑话/简称（大饼=比特币、二饼=以太坊…），换算和识别向导都认
+CRYPTO_ALIASES = {
+    u"大饼": "BTC", u"二饼": "ETH", u"泰达": "USDT", u"U币": "USDT",
+    u"狗狗": "DOGE", u"柴犬": "SHIB", u"瑞波": "XRP", u"莱特": "LTC",
+    u"波卡": "DOT", u"雪崩": "AVAX", u"链环": "LINK",
+}
+
 # 加密货币源（用户手动选，不再自动择链）
 CRYPTO_SOURCES = [
     {"id": "binance", "name": "Binance", "desc": u"实时 · 币安公开数据"},
@@ -641,6 +648,8 @@ def _fuzzy_map():
         for c, n_ in CRYPTO_NAMES.items():       # 加密货币：中文名 + 代码都进模糊表
             m.setdefault(n_, c)
             m.setdefault(c.lower(), c)
+        for s_, c in CRYPTO_ALIASES.items():
+            m.setdefault(s_, c)                  # 黑话也能打错（大宾→大饼）
         _FUZZY_MAP = m
     return _FUZZY_MAP
 
@@ -722,7 +731,8 @@ _ISO_CC = {
 # 合并替换表：货币别名 + 国家名（统一最长优先），normalize() 运行时使用。
 # 国家名也接进换算（"66新加坡" → SGD），但触发要见 parse_query 的 used_alias 规则。
 _ALL_MATCH = sorted(list(_ALIASES.items()) + list(_COUNTRY_NAME.items())
-                    + list(_PINYIN.items()) + list(_ISO_CC.items()),
+                    + list(_PINYIN.items()) + list(_ISO_CC.items())
+                    + list(CRYPTO_ALIASES.items()),
                     key=lambda kv: -len(kv[0]))
 
 # 分词候选 = 三字货币代码 + 全部别名表，按长度降序。
@@ -762,6 +772,8 @@ def recognize(text):
         for c in CRYPTO_NAMES:
             cands.append((CRYPTO_NAMES[c].lower(), c))
             cands.append((c.lower(), c))         # 加密码（btc/eth…）
+        for s_, c in CRYPTO_ALIASES.items():
+            cands.append((s_, c))                # 黑话（大饼/二饼…）
     for c in BUTTON_SHORT:
         cands.append((BUTTON_SHORT[c].lower(), c))
     cands.sort(key=lambda x: -len(x[0]))         # 长的先匹配（美元 > 美 等）
