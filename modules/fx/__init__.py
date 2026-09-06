@@ -154,6 +154,8 @@ def _menu_api():
         lines.append(u"%s <b>%s</b> — %s" % (u"🟢" if on else u"⚪", a["name"], a["desc"]))
         kb.append([{"text": _tag(a["name"], on),
                     "callback_data": "%s:api:use:%s" % (_CB, a["id"])}])
+    lines.append(u"")
+    lines.append(u"🪙 加密货币（实时价，自动择源）：<b>Binance</b> → OKX → currency-api")
     kb.append(_BACK_CLOSE)
     return u"\n".join(lines), kb
 
