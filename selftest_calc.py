@@ -353,12 +353,9 @@ def main():
     check("超时后 ans 视为 None", calc.get_ans(), None)
     check("超时后 +5 = 5（静默当普通数）", calc.format_result("+5").split("\n")[0],
           "<code>+5=5</code>｜<code>5</code>｜")
-    try:
-        calc.format_result("+5")
-    except calc.CalcError as e:
-        check("超时提示含「自动退出」", u"自动退出" in str(e), True)
+    # 上面的 +5 是一次新计算 → set_ans 刷新时间戳，面板回到「开启」状态
     _t3, _kb3 = calc.settings_panel()
-    check("面板显示已超时", u"已超时" in _t3, True)
+    check("面板显示上次结果", u"上次 5" in _t3, True)
     check("面板含 /00 说明", u"/00" in _t3, True)
     calc.set_settings(conv_on=True, conv_mode="both")
 
