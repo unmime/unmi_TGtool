@@ -102,7 +102,9 @@ def _menu_main():
         csrc_name = next((a["name"] for a in fx.CRYPTO_SOURCES
                           if a["id"] == st.get("crypto_source")),
                          st.get("crypto_source", "binance"))
-        crypto_line = u"🪙 加密货币：%s" % csrc_name
+        dc = st.get("display_crypto") or []
+        dc_txt = u" / ".join(fx.cn_name(c) for c in dc[:5]) if dc else u"还没添加"
+        crypto_line = u"🪙 加密货币（%s）：%s" % (csrc_name, dc_txt)
     else:
         crypto_line = u"🪙 加密货币：关"
     text = (
@@ -421,6 +423,7 @@ class Plugin(Module):
             return True
         if action == "cur" and len(parts) >= 3 and parts[2] == "reset":
             st["display"] = []
+            st["display_crypto"] = []
             fx.save_settings(st)
             t, kb = _menu_main()
             self.ctx.edit(chat_id, message_id, t, kb)
@@ -509,10 +512,11 @@ class Plugin(Module):
                     u"（%s）" % u"、".join(not_found[:5]) if not_found else "", tip))
             return
         st = fx.get_settings()
-        disp = list(st["display"])
+        key = "display_crypto" if mode == "crypto" else "display"
+        disp = list(st[key])
         newly = [c for c in found if c not in disp]
         disp.extend(newly)          # 保持用户添加顺序：原有的在前，新的按输入顺序在后
-        st["display"] = disp
+        st[key] = disp
         fx.save_settings(st)
         _PENDING_TYPEIN.pop(chat_id, None)
         lines = [u"✅ <b>已识别并勾选 %d 种</b>：" % len(found)]
@@ -634,14 +638,25 @@ class Plugin(Module):
             if hint:
                 out += u"\n%s" % hint
             return (out, None)
-        # 未指定目标：按展示货币出；没勾选的引导去设置
+        # 未指定目标：法币源走法币展示单，加密源走加密展示单（互不掺和）
         st = fx.get_settings()
-        if not st["display"]:
+        if frm in fx.CRYPTO_NAMES:
+            targets = [c for c in st["display_crypto"]
+                       if c != frm and c in rates]
+            if not targets:
+                self.ctx.send(u"🪙 还没添加要展示的加密货币",
+                              buttons=[[{"text": u"➕️ 添加加密货币",
+                                         "callback_data": "%s:cur:typeinc:0" % _CB}]])
+                return None
+            return (_fmt_targets(amount, frm, targets, data, expr), None)
+        targets = [c for c in st["display"]
+                   if c != frm and c not in fx.CRYPTO_NAMES and c in rates]
+        if not targets:
             self.ctx.send(_SETUP_PROMPT,
                           buttons=[[{"text": u"🪙 去勾选展示货币",
                                      "callback_data": "%s:cur:page:0" % _CB}]])
             return None
-        out, _multi = _fmt_multi(amount, frm, data, expr)
+        out = _fmt_targets(amount, frm, targets, data, expr)
         hint = fx.euro_country_hint(text) if frm == "EUR" else None
         if hint:
             out += u"\n%s" % hint

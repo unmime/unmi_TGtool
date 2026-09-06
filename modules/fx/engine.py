@@ -249,6 +249,7 @@ CRYPTO_CACHE_FILE = ""    # 由框架侧指向 DATA_DIR/fx_crypto.json（加密�
 
 _DEFAULT_TARGET = "CNY"
 _DEFAULT_DISPLAY = ["USD", "EUR", "HKD", "JPY", "KRW"]
+_DEFAULT_DISPLAY_CRYPTO = ["BTC", "ETH", "USDT"]
 
 
 # ---------------------------------------------------------------- 设置 v2
@@ -271,9 +272,17 @@ def get_settings():
     """
     d = _read_json(SETTINGS_FILE) or {}
     # display 要用「键是否存在」判断：空列表是用户刻意清空的，不能回退成默认值
+    disp = [str(c) for c in (d.get("display") or [])]
+    # 加密展示单（v3.2）：与法币单分开。老数据里混在 display 的加密码自动迁移
+    if "display_crypto" in d:
+        dc = [str(c) for c in (d.get("display_crypto") or [])]
+    else:
+        dc = [c for c in disp if c in CRYPTO_NAMES] or list(_DEFAULT_DISPLAY_CRYPTO)
+        disp = [c for c in disp if c not in CRYPTO_NAMES]
     return {
         "target": d.get("target", _DEFAULT_TARGET),
-        "display": d["display"] if "display" in d else [],
+        "display": disp,                    # 法币展示单
+        "display_crypto": dc,               # 加密展示单
         # 内置源 id（v3）。旧的自定义 apis/active_api 模型已废弃，忽略。
         "source": d.get("source", _DEFAULT_SOURCE),
         # 加密货币换算开关（v3.1）：默认关（不是人人都需要）
