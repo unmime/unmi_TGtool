@@ -44,6 +44,16 @@ BUILTIN_APIS = [
 ]
 _DEFAULT_SOURCE = "erapi"
 
+# 加密货币（从 currency-api 补充进来，不管当前用哪个源都有）。
+# 只收主流的，避免 jsdelivr 的 300+ 币把选择页刷爆。
+CRYPTO_NAMES = {
+    "BTC": u"比特币", "ETH": u"以太坊", "USDT": u"泰达币", "BNB": u"币安币",
+    "SOL": u"索拉纳", "XRP": u"瑞波币", "ADA": u"艾达币", "DOGE": u"狗狗币",
+    "TRX": u"波场币", "DOT": u"波卡币", "LTC": u"莱特币", "AVAX": u"雪崩币",
+    "LINK": u"链环币", "SHIB": u"柴犬币", "TON": u"Toncoin",
+}
+_CRYPTO_API = BUILTIN_APIS[2]        # jsdelivr 那个源，兼作加密货币数据源
+
 # ISO 4217 全表：货币代码 → (国家码, 中文名)。
 # 国旗按 ISO 3166 国家码自动生成（两位国家码 → 区域指示符），不用手维护。
 # 国家码为 "" 的是区域性货币（欧元有 EU 算例外），不显示旗子。
@@ -290,14 +300,62 @@ def _fetch_source(api):
 
 
 def fetch_rates():
-    """按当前生效的内置源拉汇率；失败按源顺序挨个回落。"""
+    """按当前生效的内置源拉汇率；失败按源顺序挨个回落。
+    法币之外再补主流加密货币（jsdelivr 兼作加密数据源，自身已含则跳过）。"""
     cur = get_settings()["source"]
     apis = sorted(BUILTIN_APIS, key=lambda a: 0 if a["id"] == cur else 1)
     for api in apis:
         data = _fetch_source(api)
         if data:
+            if api["id"] != "jsdelivr":     # jsdelivr 本身就带加密货币
+                data["rates"] = _merge_crypto(data["rates"])
             return data
     return None
+
+
+def _merge_crypto(rates):
+    """从 currency-api 把主流加密货币的汇率补进 rates（已有键不覆盖）。"""
+    data = _fetch_source(_CRYPTO_API)
+    if not data:
+        return rates
+    merged = dict(rates)
+    for code in CRYPTO_NAMES:
+        if code not in merged and code in data["rates"]:
+            merged[code] = data["rates"][code]
+    return merged
+
+
+# ---------------------------------------------------------------- 历史走势
+def chart_history(base, quote, days):
+    """拉 base→quote 近 days 天的日收盘价（frankfurter，欧央行数据）。
+
+    返回 (日期列表[MM-DD], 汇率列表)；该币种没历史数据返回 None。
+    """
+    import datetime
+    end = datetime.date.today()
+    start = end - datetime.timedelta(days=days)
+    url = ("https://api.frankfurter.app/%s..%s?from=%s&to=%s"
+           % (start.isoformat(), end.isoformat(), base, quote))
+    try:
+        req = urllib.request.Request(url, headers={
+            "User-Agent": "Mozilla/5.0 (compatible; unmi_TGtool/1.x)"})
+        with urllib.request.urlopen(req, timeout=12) as r:
+            d = json.load(r)
+    except Exception:                       # noqa: BLE001
+        return None
+    rates = d.get("rates") or {}
+    if not rates:
+        return None
+    dates, vals = [], []
+    for day in sorted(rates):
+        v = rates[day].get(quote)
+        if v is None:
+            continue
+        dates.append(day[5:])               # MM-DD
+        vals.append(v)
+    if len(vals) < 2:
+        return None
+    return dates, vals
 
 
 # ---------------------------------------------------------------- 缓存
@@ -310,7 +368,8 @@ def load_rates(force=False):
         data = _read_json(_CACHE_FILE)
     if data and isinstance(data.get("rates"), dict) and \
             data.get("api", "") == cur_api and \
-            time.time() - data.get("fetched_at", 0) < CACHE_TTL:
+            time.time() - data.get("fetched_at", 0) < CACHE_TTL and \
+            "BTC" in data["rates"]:         # 旧引擎的缓存没有加密货币 → 视为过期自愈
         return data
     fresh = fetch_rates()
     if fresh:
@@ -619,6 +678,7 @@ _ALL_MATCH = sorted(list(_ALIASES.items()) + list(_COUNTRY_NAME.items())
 # 分词候选 = 三字货币代码 + 全部别名表，按长度降序。
 # 三字码必须在两字母 ISO/拼音之前试（不然 "hkcny" 会被拆成 hk+cn+y）。
 _CODE3 = {c.lower(): c for c in CN_NAMES}
+_CODE3.update({c.lower(): c for c in CRYPTO_NAMES})   # 加密货币码也能分词（1btcusd）
 _TOKEN_PATTERNS = sorted(list(_CODE3.items()) + _ALL_MATCH,
                          key=lambda kv: -len(kv[0]))
 
@@ -791,10 +851,15 @@ def unit(code):
 
 
 def cn_name(code):
+    """币种中文名：法币查国家表，加密货币查加密表，没有就返回三字码。"""
+    if code in CRYPTO_NAMES:
+        return CRYPTO_NAMES[code]
     return CN_NAMES.get(code, code)
 
 
 def flag(code):
+    if code in CRYPTO_NAMES:
+        return u"🪙"                   # 加密货币没有国旗，用硬币
     return FLAGS.get(code, "")
 
 

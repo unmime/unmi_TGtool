@@ -130,7 +130,7 @@ check("XYZ（不在表里，回退代码）", fx.cn_name("XYZ"), "XYZ")
 print(u"── 7. 缓存读写（临时目录）")
 tmpd = tempfile.mkdtemp()
 fx._CACHE_FILE = os.path.join(tmpd, "rates.json")
-fake = {"rates": RATES, "ts": 1, "src": "test", "api": "erapi", "fetched_at": 10**12}   # fetched_at 在未来 → 永不过期
+fake = {"rates": dict(RATES, BTC=6.5), "ts": 1, "src": "test", "api": "erapi", "fetched_at": 10**12}   # fetched_at 在未来 → 永不过期
 with open(fx._CACHE_FILE, "w") as f:
     json.dump(fake, f)
 data = fx.load_rates()

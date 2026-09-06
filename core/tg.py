@@ -68,6 +68,14 @@ class BotContext(object):
                                                 ensure_ascii=False)
         return self.api("sendMessage", params)
 
+    def send_photo(self, photo, caption=None, chat_id=None):
+        """发图片。photo 可以是 URL（由 Telegram 服务器拉取）。"""
+        params = {"chat_id": chat_id or self.chat_id, "photo": photo}
+        if caption:
+            params["caption"] = _clip(caption)
+            params["parse_mode"] = "HTML"
+        return self.api("sendPhoto", params)
+
     def edit(self, chat_id, message_id, text, buttons=None):
         params = {"chat_id": chat_id, "message_id": message_id, "text": _clip(text),
                   "parse_mode": "HTML", "disable_web_page_preview": "true"}
