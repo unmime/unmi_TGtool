@@ -556,8 +556,9 @@ DEFAULT_SETTINGS = {"decimals": DEFAULT_DECIMALS, "fmt": "paren",
 DECIMAL_CHOICES = [1, 2, 3, 4, 5, 6]
 FMT_LABEL = {"result": u"仅结果", "eq": u"算式+结果", "paren": u"算式+结果（结果）"}
 FMT_ORDER = ["result", "eq", "paren"]
-CONV_LABEL = {"read": u"自然读法", "acct": u"会计大写", "both": u"两种都显示"}
-CONV_ORDER = ["read", "acct", "both"]
+CONV_LABEL = {"read": u"自然读法", "acct": u"会计大写",
+              "both": u"两种都显示", "off": u"不显示"}
+CONV_ORDER = ["read", "acct", "both", "off"]
 
 
 _SETTINGS_CACHE = None
@@ -1062,12 +1063,16 @@ def settings_panel():
           "callback_data": "calcset:conv:toggle"}],
     ]
     if s["conv_on"]:
-        # 「两种都显示」时自然读法和会计大写都算选中
-        _both = (s["conv_mode"] == "both")
-        kb.append([{"text": _tag(CONV_LABEL[m], _both or s["conv_mode"] == m),
-                    "callback_data": "calcset:cmode:%s" % m} for m in CONV_ORDER[:2]])
-        kb.append([{"text": _tag(CONV_LABEL[m], _both or s["conv_mode"] == m),
-                    "callback_data": "calcset:cmode:%s" % m} for m in CONV_ORDER[2:]])
+        # 独立双开关：读法/大写各自切换；「两种都显示」在两者全开时自动亮起
+        read = s["conv_mode"] in ("read", "both")
+        acct = s["conv_mode"] in ("acct", "both")
+        kb.append([
+            {"text": _tag(CONV_LABEL["read"], read),
+             "callback_data": "calcset:cmode:read"},
+            {"text": _tag(CONV_LABEL["acct"], acct),
+             "callback_data": "calcset:cmode:acct"}])
+        kb.append([{"text": _tag(CONV_LABEL["both"], read and acct),
+                    "callback_data": "calcset:cmode:both"}])
     # 连续计算：开关一行，开启时多一行「清除记录」
     kb.append([{"text": _tag(u"连续计算：开", ans_on) if ans_on else u"连续计算：关",
                 "callback_data": "calcset:ans:toggle"}])
@@ -1104,8 +1109,19 @@ def handle_cb(data):
         m = parts[2]
         if m not in CONV_ORDER:
             raise CalcError("未知转换方式")
-        s = set_settings(conv_mode=m, conv_on=True)
-        alert = u"转换：%s" % CONV_LABEL[m]
+        read = s["conv_mode"] in ("read", "both")
+        acct = s["conv_mode"] in ("acct", "both")
+        # 独立双开关：点已开的关掉，点没开的加上；两种都开=both，全关=off
+        if m == "both":
+            new = "both"
+        elif m == "read":
+            new = ("acct" if acct else "off") if read else \
+                  ("both" if acct else "read")
+        else:
+            new = ("read" if read else "off") if acct else \
+                  ("both" if read else "acct")
+        s = set_settings(conv_mode=new, conv_on=True)
+        alert = u"转换：%s" % CONV_LABEL[new]
     elif len(parts) >= 3 and parts[1] == "ans" and parts[2] == "toggle":
         new_on = not bool(s.get("ans_on"))
         s = set_settings(ans_on=new_on)
