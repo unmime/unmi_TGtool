@@ -1048,21 +1048,19 @@ def settings_panel():
         % (s["decimals"], FMT_LABEL[s["fmt"]], conv_txt, CONV_LABEL[s["conv_mode"]],
            ans_txt)
     )
-    # 显示格式：paren 是 eq 的超集 → 选 paren 时 eq 也亮
-    def _fmt_on(f):
-        if f == "eq":
-            return s["fmt"] in ("eq", "paren")
-        return s["fmt"] == f
+    # 显示格式：双开关（算式+结果 / 结果括号）
+    eq_on = s["fmt"] in ("eq", "paren")
+    paren_on = s["fmt"] == "paren"
     kb = [
         # 小数位 6 档拆两行（3+3），否则勾选标记会把按钮挤到被 Telegram 截断
         [{"text": _tag(u"%d 位" % d, s["decimals"] == d),
           "callback_data": "calcset:dec:%d" % d} for d in DECIMAL_CHOICES[:3]],
         [{"text": _tag(u"%d 位" % d, s["decimals"] == d),
           "callback_data": "calcset:dec:%d" % d} for d in DECIMAL_CHOICES[3:]],
-        [{"text": _tag(FMT_LABEL[f], _fmt_on(f)),
-          "callback_data": "calcset:fmt:%s" % f} for f in FMT_ORDER[:2]],
-        [{"text": _tag(FMT_LABEL[f], _fmt_on(f)),
-          "callback_data": "calcset:fmt:%s" % f} for f in FMT_ORDER[2:]],
+        [{"text": _tag(FMT_LABEL["eq"], eq_on),
+          "callback_data": "calcset:fmt:eq_toggle"},
+         {"text": _tag(u"（结果）", paren_on),
+          "callback_data": "calcset:fmt:paren_toggle"}],
         [{"text": _tag(u"转换：开", s["conv_on"]) if s["conv_on"] else u"转换：关",
           "callback_data": "calcset:conv:toggle"}],
     ]
@@ -1075,8 +1073,7 @@ def settings_panel():
              "callback_data": "calcset:cmode:read"},
             {"text": _tag(CONV_LABEL["acct"], acct),
              "callback_data": "calcset:cmode:acct"}])
-        kb.append([{"text": _tag(CONV_LABEL["both"], read and acct),
-                    "callback_data": "calcset:cmode:both"}])
+
     # 连续计算：开关一行，开启时多一行「清除记录」
     kb.append([{"text": _tag(u"连续计算：开", ans_on) if ans_on else u"连续计算：关",
                 "callback_data": "calcset:ans:toggle"}])
@@ -1100,6 +1097,16 @@ def handle_cb(data):
             raise CalcError("只支持 1~6 位")
         s = set_settings(decimals=n)
         alert = u"小数保留 %d 位" % n
+    elif len(parts) >= 3 and parts[1] == "fmt" and parts[2] == "eq_toggle":
+        # 算式+结果 开关：开着 → 关（仅结果）；关 → 开（eq）
+        new = "result" if s["fmt"] in ("eq", "paren") else "eq"
+        s = set_settings(fmt=new)
+        alert = u"格式：%s" % FMT_LABEL[new]
+    elif len(parts) >= 3 and parts[1] == "fmt" and parts[2] == "paren_toggle":
+        # （结果）开关：关 → 开（paren，自动带算式）；开 → 关（eq）
+        new = "eq" if s["fmt"] == "paren" else "paren"
+        s = set_settings(fmt=new)
+        alert = u"格式：%s" % FMT_LABEL[new]
     elif len(parts) >= 3 and parts[1] == "fmt":
         m = parts[2]
         if m not in FMT_ORDER:
