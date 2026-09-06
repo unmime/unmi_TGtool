@@ -109,7 +109,7 @@ def _menu_main():
         u"%s" % (
             disp_txt, fx.cn_name(st["target"]), st["target"], src, crypto_line))
     kb = [
-        [{"text": u"➕️ 添加法定货币",
+        [{"text": u"🟢➕️ 添加法定货币",
           "callback_data": "%s:cur:typein:0" % _CB}],
         [{"text": u"🔄 重置展示货币", "callback_data": "%s:cur:reset" % _CB}],
         [{"text": u"🎯 默认目标 ▸", "callback_data": "%s:tgt:page:0" % _CB},
@@ -117,7 +117,7 @@ def _menu_main():
         [{"text": u"🪙 加密货币换算：%s" % (u"🟢 开" if st["crypto_on"] else u"⚪ 关"),
           "callback_data": "%s:cryptotoggle" % _CB}]]
     if st["crypto_on"]:       # 关着时不显示加密向导入口
-        kb.append([{"text": u"➕️ 添加加密货币",
+        kb.append([{"text": u"🟢➕️ 添加加密货币",
                     "callback_data": "%s:cur:typeinc:0" % _CB}])
     kb.append([
         {"text": u"🔄 刷新汇率", "callback_data": "%s:refresh" % _CB},
