@@ -351,7 +351,8 @@ def main():
     calc.set_settings(ans_ts=_time.time() - (calc.CONT_TIMEOUT + 1))
     check("超时后 cont_expired", calc.cont_expired(), True)
     check("超时后 ans 视为 None", calc.get_ans(), None)
-    expect_err("超时后 +5 报错", calc.format_result, "+5")
+    check("超时后 +5 = 5（静默当普通数）", calc.format_result("+5").split("\n")[0],
+          "<code>+5=5</code>｜<code>5</code>｜")
     try:
         calc.format_result("+5")
     except calc.CalcError as e:
@@ -375,7 +376,8 @@ def main():
     calc._SETTINGS_CACHE = None
     check("无时间戳的旧记录判为过期", calc.cont_expired(), True)
     check("无时间戳时 get_ans 为 None", calc.get_ans(), None)
-    expect_err("无时间戳时 +1 报错", calc.format_result, "+1")
+    check("无时间戳时 +1 = 1（静默当普通数）", calc.format_result("+1").split("\n")[0],
+          "<code>+1=1</code>｜<code>1</code>｜")
     # 关掉开关后 /00 不该被当成退出指令（避免回废话）
     calc.set_settings(ans_on=False)
     check("关闭时 /00 不算退出", calc.is_cont_exit("/00"), False)
