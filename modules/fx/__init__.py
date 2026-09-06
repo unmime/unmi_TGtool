@@ -42,6 +42,10 @@ _BTN_PER_ROW = 3       # 货币按钮每行 3 个（带国旗+名字，3 个不�
 # 「直接输入」选货币的向导状态：chat_id → True（等用户发货币/国家名）
 _PENDING_TYPEIN = {}
 
+# 加密货币关闭时用户尝试的换算：chat_id → (amount, frm, to, text, expr)
+# 一键开启后直接把结果补出来，不用重发
+_PENDING_CRYPTO = {}
+
 _TYPEIN_GUIDE = (
     u"✏️ <b>直接输入货币</b>\n\n"
     u"把货币或国家名发给我，<b>连着写</b>或用空格/逗号隔开都行：\n"
@@ -320,10 +324,17 @@ class Plugin(Module):
             self.ctx.answer(cb_id, u"已更新")
             return True
         if action == "cryptoon":
-            # 一键开启（关闭提示消息上的按钮）
+            # 一键开启：把关闭时用户尝试的那条换算直接补出来（原消息编辑成结果）
             st["crypto_on"] = True
             fx.save_settings(st)
             fx.load_rates(force=True)
+            pend = _PENDING_CRYPTO.pop(chat_id, None)
+            if pend:
+                r = self._build_reply(*pend)
+                if r:
+                    self.ctx.edit(chat_id, message_id, r[0], r[1])
+                    self.ctx.answer(cb_id, u"🪙 已开启，这是结果")
+                    return True
             self.ctx.edit(chat_id, message_id,
                           u"✅ <b>加密货币换算已开启</b>（实时价 · Binance）\n"
                           u"再发一次刚才的换算就行")
@@ -493,61 +504,70 @@ class Plugin(Module):
 
     # ------------------------------------------------------------- 内部
     def _reply(self, amount, frm, to, text="", expr=None):
+        r = self._build_reply(amount, frm, to, text, expr)
+        if r:
+            self.ctx.send(r[0], buttons=r[1])
+
+    def _build_reply(self, amount, frm, to, text="", expr=None):
+        """构建换算结果 (HTML, buttons)。无法换算返回 None（提示已直接发给用户）。"""
+        chat_id = self.ctx.chat_id
         data = fx.load_rates()
         if not data:
             self.ctx.send(u"⚠️ 汇率暂时取不到（网络问题？稍后再试）")
-            return
+            return None
         rates = data["rates"]
         crypto_off_btn = [[{"text": u"🪙 一键开启加密货币换算",
                             "callback_data": "%s:cryptoon" % _CB}]]
         if frm not in rates:
             if frm in fx.CRYPTO_NAMES:
-                self.ctx.send(u"🪙 加密货币换算当前是关闭的，点下面按钮打开后重发即可",
+                _PENDING_CRYPTO[chat_id] = (amount, frm, to, text, expr)
+                self.ctx.send(u"🪙 加密货币换算当前是关闭的，点下面按钮直接出结果",
                               buttons=crypto_off_btn)
-                return
+                return None
             sug = _suggest(frm, fx.known_codes(data))
             self.ctx.send(u"不认识 %s%s" % (
                 frm, u"（是想说 %s 吗？）" % u" / ".join(sug) if sug else u""))
-            return
+            return None
         if isinstance(to, list):            # 多目标：1mjrbxjpcny → 1 USD → JPY/SGD/CNY
             unknown = [c for c in to if c not in rates]
             if unknown:
                 btn = crypto_off_btn if any(c in fx.CRYPTO_NAMES for c in unknown) else None
                 self.ctx.send(u"不认识 %s。/fx 的「展示货币」页有完整列表"
                               % u"、".join(unknown), buttons=btn)
-                return
+                return None
             targets = [c for c in to if c != frm]
             if not targets:
                 self.ctx.send(u"目标和源是同一种货币，不用换算 😄")
-                return
-            self.ctx.send(_fmt_targets(amount, frm, targets, data, expr))
-            return
+                return None
+            return (_fmt_targets(amount, frm, targets, data, expr), None)
         if to is not None and to == frm:
-            self.ctx.send(
-                u"%s %s %s（%s）—— 同一种货币，不用换算 😄\n"
-                u"想换成别的，比如发 <code>%s %s usd</code>" % (
-                    fx.fmt_amt(amount), fx.flag(frm) or u"　",
-                    fx.cn_name(frm), frm, fx.fmt_amt(amount), frm.lower()))
-            return
+            return (u"%s %s %s（%s）—— 同一种货币，不用换算 😄\n"
+                    u"想换成别的，比如发 <code>%s %s usd</code>" % (
+                        fx.fmt_amt(amount), fx.flag(frm) or u"　",
+                        fx.cn_name(frm), frm, fx.fmt_amt(amount), frm.lower()), None)
         if to is not None:
             if to not in rates:
+                if to in fx.CRYPTO_NAMES:
+                    _PENDING_CRYPTO[chat_id] = (amount, frm, to, text, expr)
+                    self.ctx.send(u"🪙 目标币是加密货币，但换算开关是关的，点下面按钮直接出结果",
+                                  buttons=crypto_off_btn)
+                    return None
                 self.ctx.send(u"不认识目标币 %s。/fx 的「展示货币」页有完整列表" % to)
-                return
+                return None
             hint = fx.euro_country_hint(text) if "EUR" in (frm, to) else None
             out = _fmt_pair(amount, frm, to, data, expr)
             if hint:
                 out += u"\n%s" % hint
-            self.ctx.send(out)
-            return
+            return (out, None)
         # 未指定目标：按展示货币出；没勾选的引导去设置
         st = fx.get_settings()
         if not st["display"]:
             self.ctx.send(_SETUP_PROMPT,
                           buttons=[[{"text": u"🪙 去勾选展示货币",
                                      "callback_data": "%s:cur:page:0" % _CB}]])
-            return
+            return None
         out, _multi = _fmt_multi(amount, frm, data, expr)
         hint = fx.euro_country_hint(text) if frm == "EUR" else None
         if hint:
             out += u"\n%s" % hint
-        self.ctx.send(out)
+        return (out, None)
