@@ -113,12 +113,10 @@ def _menu_main():
         u"💱 <b>汇率换算</b>\n\n"
         u"直接发金额就能换，比如 <code>22人民币</code> / <code>zg</code> / <code>$100</code> / <code>100usd</code>\n\n"
         u"💵 法定货币：%s\n"
-        u"🎯 默认目标：%s（%s）\n"
         u"%s\n\n"
         u"💵 汇率源：%s\n"
         u"%s" % (
-            disp_txt, fx.cn_name(st["target"]), st["target"],
-            crypto_line, src, csrc_line))
+            disp_txt, crypto_line, src, csrc_line))
     row0 = [{"text": u"➕️ 添加法定货币",
              "callback_data": "%s:cur:typein:0" % _CB}]
     if st["crypto_on"]:       # 关着时不显示加密向导入口
