@@ -191,12 +191,14 @@ def _is_cont_input(text):
 def looks_like_expr(text):
     """判断这条消息是否应当被当作算式处理。保守判定，避免误伤 IP、普通聊天。"""
     s = _normalize(text)
-    if not s or len(s) < 3 or len(s) > MAX_LEN:
-        return False
-    if _IPV4_RE.search(s) or ":" in s:          # 别把 1.2.3.0/24 或 IPv6 当算式
+    if not s:
         return False
     if s.replace(",", "").replace(".", "").isdigit():
         return True                             # 纯数字（44 / 1,500 / 3.14）也算算式
+    if len(s) < 3 or len(s) > MAX_LEN:
+        return False
+    if _IPV4_RE.search(s) or ":" in s:          # 别把 1.2.3.0/24 或 IPv6 当算式
+        return False
     if any(c not in _EXPR_CHARS for c in s):
         return False
     ans_on = bool(get_settings().get("ans_on"))
