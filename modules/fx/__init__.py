@@ -42,6 +42,14 @@ _BTN_PER_ROW = 3       # 货币按钮每行 3 个（带国旗+名字，3 个不�
 # 「直接输入」选货币的向导状态：chat_id → True（等用户发货币/国家名）
 _PENDING_TYPEIN = {}
 
+_TYPEIN_GUIDE = (
+    u"✏️ <b>直接输入货币</b>\n\n"
+    u"把货币或国家名发给我，<b>连着写</b>或用空格/逗号隔开都行：\n"
+    u"<code>美金人民币日元澳大利亚印度</code>\n"
+    u"<code>usd eur 日本 澳洲</code>\n\n"
+    u"认出来的自动勾选，没认出来的会告诉你。\n"
+    u"发「取消」退出")
+
 
 # ---------------------------------------------------------------- 按钮标签
 def _tag(label, selected):
@@ -79,21 +87,27 @@ def _menu_main():
                st["source"])
     crypto = u"、".join(fx.CRYPTO_NAMES[c] for c in
                         ("BTC", "ETH", "USDT", "SOL", "DOGE"))
+    crypto_line = (u"🪙 加密货币：开（实时价 · Binance）" if st["crypto_on"]
+                   else u"🪙 加密货币：关")
     text = (
         u"💱 <b>汇率换算</b>\n\n"
-        u"直接发金额就能换，比如 <code>22人民币</code> / <code>$100</code> / <code>100usd</code> / <code>0.5btc</code>\n"
-        u"🪙 支持加密货币（实时价）：%s 等 %d 种\n\n"
-        u"🌐 展示货币：%s\n"
+        u"直接发金额就能换，比如 <code>22人民币</code> / <code>$100</code> / <code>100usd</code>"
+        + (u" / <code>0.5btc</code>\n" if st["crypto_on"] else u"\n")
+        + (u"🪙 支持加密货币（实时价）：%s 等 %d 种\n\n" % (crypto, len(fx.CRYPTO_NAMES))
+           if st["crypto_on"] else u"\n")
+        + u"🌐 展示货币：%s\n"
         u"🎯 默认目标：%s（%s）\n"
-        u"🔌 汇率源：%s" % (
-            crypto, len(fx.CRYPTO_NAMES),
-            disp_txt, fx.cn_name(st["target"]), st["target"], src))
+        u"🔌 汇率源：%s\n"
+        u"%s" % (
+            disp_txt, fx.cn_name(st["target"]), st["target"], src, crypto_line))
     kb = [
         [{"text": u"🪙 展示货币 ▸", "callback_data": "%s:cur:page:0" % _CB}],
         [{"text": u"✏️ 输入货币关键字添加转换货币",
           "callback_data": "%s:cur:typein:0" % _CB}],
         [{"text": u"🎯 默认目标 ▸", "callback_data": "%s:tgt:page:0" % _CB},
          {"text": u"🔌 汇率源 ▸", "callback_data": "%s:api:open" % _CB}],
+        [{"text": u"🪙 加密货币换算：%s" % (u"🟢 开" if st["crypto_on"] else u"⚪ 关"),
+          "callback_data": "%s:cryptotoggle" % _CB}],
         [{"text": u"🔄 刷新汇率", "callback_data": "%s:refresh" % _CB},
          {"text": u"❌ 收起", "callback_data": "%s:close" % _CB}],
     ]
@@ -308,6 +322,15 @@ class Plugin(Module):
             self.ctx.edit(chat_id, message_id, t, kb)
             self.ctx.answer(cb_id, u"已更新")
             return True
+        if action == "cryptotoggle":
+            st["crypto_on"] = not st.get("crypto_on", False)
+            fx.save_settings(st)
+            fx.load_rates(force=True)     # 立即重算（合并或剔除加密币）
+            t, kb = _menu_main()
+            self.ctx.edit(chat_id, message_id, t, kb)
+            self.ctx.answer(cb_id, u"🪙 加密货币换算已开启" if st["crypto_on"]
+                            else u"加密货币换算已关闭")
+            return True
         if action == "refresh":
             data = fx.load_rates(force=True)
             t, kb = _menu_main()
@@ -469,6 +492,9 @@ class Plugin(Module):
             return
         rates = data["rates"]
         if frm not in rates:
+            if frm in fx.CRYPTO_NAMES:
+                self.ctx.send(u"🪙 加密货币换算当前是关闭的：/fx → 「加密货币换算」打开后再试")
+                return
             sug = _suggest(frm, fx.known_codes(data))
             self.ctx.send(u"不认识 %s%s" % (
                 frm, u"（是想说 %s 吗？）" % u" / ".join(sug) if sug else u""))

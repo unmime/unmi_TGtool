@@ -261,6 +261,8 @@ def get_settings():
         "display": d["display"] if "display" in d else [],
         # 内置源 id（v3）。旧的自定义 apis/active_api 模型已废弃，忽略。
         "source": d.get("source", _DEFAULT_SOURCE),
+        # 加密货币换算开关（v3.1）：默认关（不是人人都需要）
+        "crypto_on": bool(d.get("crypto_on", False)),
     }
 
 
@@ -386,6 +388,13 @@ def _crypto_rates():
     return out
 
 
+def _apply_crypto(st, rates):
+    """按开关处理加密货币：开→合并实时价；关→从 rates 里剔除（含 jsdelivr 自带的）。"""
+    if st.get("crypto_on"):
+        return _merge_crypto(rates)
+    return {k: v for k, v in rates.items() if k not in CRYPTO_NAMES}
+
+
 # ---------------------------------------------------------------- 缓存
 def load_rates(force=False):
     """带缓存的汇率读取：同一源 1 小时内直接用缓存；换源或过期重新拉。"""
@@ -398,7 +407,7 @@ def load_rates(force=False):
             data.get("api", "") == cur_api and \
             time.time() - data.get("fetched_at", 0) < CACHE_TTL:
         out = dict(data)
-        out["rates"] = _merge_crypto(data["rates"])   # 加密价独立 5 分钟缓存
+        out["rates"] = _apply_crypto(st, data["rates"])   # 加密价独立 5 分钟缓存
         return out
     fresh = fetch_rates()
     if fresh:
@@ -410,7 +419,7 @@ def load_rates(force=False):
         except Exception:                   # noqa: BLE001  写不进缓存不影响本次使用
             pass
         out = dict(fresh)
-        out["rates"] = _merge_crypto(fresh["rates"])
+        out["rates"] = _apply_crypto(st, fresh["rates"])
         return out
     # 拉不到就用过期的顶着（同一源的过期数据 > 换源的旧数据）
     if data:
@@ -739,9 +748,10 @@ def recognize(text):
     for c in CN_NAMES:
         cands.append((CN_NAMES[c].lower(), c))
         cands.append((c.lower(), c))             # 三字码本身
-    for c in CRYPTO_NAMES:
-        cands.append((CRYPTO_NAMES[c].lower(), c))
-        cands.append((c.lower(), c))             # 加密码（btc/eth…）
+    if get_settings().get("crypto_on"):          # 加密货币开关：关时不参与识别
+        for c in CRYPTO_NAMES:
+            cands.append((CRYPTO_NAMES[c].lower(), c))
+            cands.append((c.lower(), c))         # 加密码（btc/eth…）
     for c in BUTTON_SHORT:
         cands.append((BUTTON_SHORT[c].lower(), c))
     cands.sort(key=lambda x: -len(x[0]))         # 长的先匹配（美元 > 美 等）
@@ -784,9 +794,13 @@ def recognize(text):
                 continue                    # 单字符碎片（usdd 剩的 d 之类）没意义
             not_found.append(tok)
     # 没认出来的再过一遍错别字模糊匹配（新家坡→新加坡元；收敛到唯一代码才认）
+    crypto_ok = get_settings().get("crypto_on")
     fuzzy_hits = []
     still = []
     for tok in not_found:
+        if not crypto_ok and tok.upper() in CRYPTO_NAMES:
+            still.append(tok)       # 打的是加密码但开关关着：明确不认，别模糊到别国货币
+            continue
         r = _fuzzy_code(tok.lower())
         if r and r[0] not in seen:
             found.append(r[0])
@@ -898,11 +912,16 @@ def flag(code):
 
 
 def fmt_amt(x):
-    """金额展示：大数带千分位，小数最多 2 位；汇率展示用 fmt_rate。"""
+    """金额展示：大数带千分位；小于 1 的金额（加密货币常见）给足精度不四舍五入。"""
     if x >= 1000:
         return "{:,.2f}".format(x)
-    s = "{:.2f}".format(x)
-    return s
+    if x >= 1:
+        return "{:.2f}".format(x)
+    if x >= 0.01:
+        s = "{:.4f}".format(x)
+    else:
+        s = "{:.8f}".format(x)
+    return s.rstrip("0").rstrip(".") or "0"
 
 
 def fmt_rate(x):
@@ -910,7 +929,10 @@ def fmt_rate(x):
         return "{:,.2f}".format(x)
     if x >= 1:
         return "{:.4f}".format(x)
-    return "{:.6f}".format(x).rstrip("0").rstrip(".")
+    if x >= 0.01:
+        return "{:.6f}".format(x).rstrip("0").rstrip(".")
+    s = "{:.8f}".format(x).rstrip("0").rstrip(".")
+    return s or "0"
 
 
 def esc(s):
