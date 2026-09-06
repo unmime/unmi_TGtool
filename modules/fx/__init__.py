@@ -77,12 +77,16 @@ def _menu_main():
         disp_txt = u"（还没勾选 · 换算时会引导你设置）"
     src = next((a["name"] for a in fx.BUILTIN_APIS if a["id"] == st["source"]),
                st["source"])
+    crypto = u"、".join(fx.CRYPTO_NAMES[c] for c in
+                        ("BTC", "ETH", "USDT", "SOL", "DOGE"))
     text = (
         u"💱 <b>汇率换算</b>\n\n"
-        u"直接发金额就能换，比如 <code>22人民币</code> / <code>$100</code> / <code>100usd</code>\n\n"
-        u"🪙 展示货币：%s\n"
+        u"直接发金额就能换，比如 <code>22人民币</code> / <code>$100</code> / <code>100usd</code> / <code>0.5btc</code>\n"
+        u"🪙 支持加密货币（实时价）：%s 等 %d 种\n\n"
+        u"🌐 展示货币：%s\n"
         u"🎯 默认目标：%s（%s）\n"
         u"🔌 汇率源：%s" % (
+            crypto, len(fx.CRYPTO_NAMES),
             disp_txt, fx.cn_name(st["target"]), st["target"], src))
     kb = [
         [{"text": u"🪙 展示货币 ▸", "callback_data": "%s:cur:page:0" % _CB}],
