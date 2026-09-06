@@ -18,7 +18,7 @@
 set -euo pipefail
 
 # ---- 常量 ----
-VERSION="v1.0.0.4"
+VERSION="v1.0.0.5"
 REPO="unmime/unmi_TGtool"
 # 始终拉 latest，不要把 VERSION 拼进链接。
 #
@@ -44,9 +44,19 @@ fi
 # 没有控制终端就退回 stdin，都读不到返回 1 —— 本脚本开了 set -e，裸 read 失败会直接中断安装。
 tty_read() {
   local __v="$1"; shift
-  printf '%s' "$*" > /dev/tty 2>/dev/null || printf '%s' "$*"
-  # shellcheck disable=SC2229  # "$__v" 是故意的：按调用方传入的变量名动态赋值
-  read -r "$__v" < /dev/tty 2>/dev/null || read -r "$__v" || return 1
+  # 先探测 /dev/tty 能不能打开，再决定走哪条路。
+  # 不能直接写 `printf ... > /dev/tty 2>/dev/null` —— 重定向是按从左到右处理的，
+  # 失败发生在 stderr 被改之前，那句是拦不住的，非交互场景会漏出「/dev/tty: 没有那个设备或地址」。
+  if (exec 3</dev/tty) 2>/dev/null; then
+    printf '%s' "$*" >&3
+    # shellcheck disable=SC2229  # "$__v" 是故意的：按调用方传入的变量名动态赋值
+    read -r "$__v" <&3 || read -r "$__v" || return 1
+    exec 3<&-
+  else
+    printf '%s' "$*"
+    # shellcheck disable=SC2229  # 同上，动态变量名
+    read -r "$__v" || return 1
+  fi
 }
 
 info()  { echo -e "${C_CYAN}  [i]${C_RESET} $*"; }
