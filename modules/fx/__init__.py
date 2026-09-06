@@ -98,8 +98,13 @@ def _menu_main():
                st["source"])
     crypto = u"、".join(fx.CRYPTO_NAMES[c] for c in
                         ("BTC", "ETH", "USDT", "SOL", "DOGE"))
-    crypto_line = (u"🪙 加密货币：开（实时价 · Binance）" if st["crypto_on"]
-                   else u"🪙 加密货币：关")
+    if st["crypto_on"]:
+        csrc_name = next((a["name"] for a in fx.CRYPTO_SOURCES
+                          if a["id"] == st.get("crypto_source")),
+                         st.get("crypto_source", "binance"))
+        crypto_line = u"🪙 加密货币：%s" % csrc_name
+    else:
+        crypto_line = u"🪙 加密货币：关"
     text = (
         u"💱 <b>汇率换算</b>\n\n"
         u"直接发金额就能换，比如 <code>22人民币</code> / <code>zg</code> / <code>$100</code> / <code>100usd</code>\n\n"
