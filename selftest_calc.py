@@ -182,7 +182,7 @@ def main():
     _t, kb = calc.settings_panel()
     flat = [b["text"] for row in kb for b in row]
     check("小数位勾选", u"2 位 🟢" in flat, True)
-    check("格式勾选", u"算式+结果（结果） 🟢" in flat, True)
+    check("格式勾选", u"（结果） 🟢" in flat, True)
     check("两种都显示时双绿点",
           (u"自然读法 🟢" in flat) and (u"会计大写 🟢" in flat), True)
     widest = max(u"".join(btn["text"] for btn in row) for row in kb)
@@ -275,7 +275,7 @@ def main():
     _t2, kb2 = calc.settings_panel()
     flat2 = [b["text"] for row in kb2 for b in row]
     check("面板含连续计算开关", any(u"连续计算" in t for t in flat2), True)
-    check("面板含清除按钮", any(u"清除上次结果" in t for t in flat2), True)
+    check("面板无清除按钮（已删）", not any(u"清除上次结果" in t for t in flat2), True)
     check("面板显示上次结果", u"上次 56" in _t2, True)
     check("ans 开关回调", bool(calc.handle_cb("calcset:ans:toggle")), True)
     check("切换后为关闭", calc.get_settings()["ans_on"], False)
