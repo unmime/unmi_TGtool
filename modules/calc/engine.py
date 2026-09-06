@@ -523,7 +523,7 @@ def _eval(node, depth):
 
 DEFAULT_SETTINGS = {"decimals": DEFAULT_DECIMALS, "fmt": "paren",
                     "conv_on": True, "conv_mode": "both",
-                    "ans_on": False, "ans": None, "ans_ts": 0}   # 连续计算默认关闭
+                    "ans_on": True, "ans": None, "ans_ts": 0}   # 连续计算默认开启
 DECIMAL_CHOICES = [1, 2, 3, 4, 5, 6]
 FMT_LABEL = {"result": u"仅结果", "eq": u"算式+结果", "paren": u"算式+结果（结果）"}
 FMT_ORDER = ["result", "eq", "paren"]
