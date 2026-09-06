@@ -638,6 +638,9 @@ def _fuzzy_map():
             m.setdefault(sh, c)
         for c in CN_NAMES:                       # 三字码本身也允许打错一个字母
             m.setdefault(c.lower(), c)
+        for c, n_ in CRYPTO_NAMES.items():       # 加密货币：中文名 + 代码都进模糊表
+            m.setdefault(n_, c)
+            m.setdefault(c.lower(), c)
         _FUZZY_MAP = m
     return _FUZZY_MAP
 
@@ -809,6 +812,9 @@ def recognize(text):
             still.append(tok)       # 打的是加密码但开关关着：明确不认，别模糊到别国货币
             continue
         r = _fuzzy_code(tok.lower())
+        if r and not crypto_ok and r[0] in CRYPTO_NAMES:
+            still.append(tok)       # 模糊命中加密码但开关关着 → 同样不收
+            continue
         if r and r[0] not in seen:
             found.append(r[0])
             seen.add(r[0])
