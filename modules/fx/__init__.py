@@ -266,6 +266,13 @@ class Plugin(Module):
     # ------------------------------------------------------------- 消息
     def on_message(self, text, chat_id):
         if chat_id in _PENDING_TYPEIN:
+            # 带金额的合法换算式优先走换算（向导只是选币，别吞掉正经查询）。
+            # 判据：文本含数字 且 能解析出币种。纯名字（"美元 日元"）仍归向导。
+            if re.search(r"[0-9]", text):
+                q = fx.parse_query_ex(text)
+                if q and q["frm"]:
+                    self._reply(q["amount"], q["frm"], q["to"], text, q["expr"])
+                    return True                  # 向导状态保留，选币继续有效
             self._handle_typein_wizard(text, chat_id)
             return True
         if len(text) > 32:

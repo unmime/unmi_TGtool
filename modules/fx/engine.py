@@ -739,6 +739,9 @@ def recognize(text):
     for c in CN_NAMES:
         cands.append((CN_NAMES[c].lower(), c))
         cands.append((c.lower(), c))             # 三字码本身
+    for c in CRYPTO_NAMES:
+        cands.append((CRYPTO_NAMES[c].lower(), c))
+        cands.append((c.lower(), c))             # 加密码（btc/eth…）
     for c in BUTTON_SHORT:
         cands.append((BUTTON_SHORT[c].lower(), c))
     cands.sort(key=lambda x: -len(x[0]))         # 长的先匹配（美元 > 美 等）
