@@ -45,7 +45,11 @@ install -m 644 "$SRC_DIR/main.py" "$APP_DIR/"
 # 控制台命令：不装的话装完还得再跑一遍在线脚本才能用 unmi
 if [ -f "$SRC_DIR/unmi-cli.sh" ]; then
   # 重装时沿用用户改过的命令名（存运行数据目录，不会被代码覆盖）
-  PANEL_CMD="$(tr -d ' \t\r\n' < "$APP_DIR/data/panel-cmd.conf" 2>/dev/null)"
+  # 同上：先判存在再读，全新安装时 data/ 目录还没有，别让重定向错误打断安装
+  PANEL_CMD=""
+  if [ -f "$APP_DIR/data/panel-cmd.conf" ]; then
+    PANEL_CMD="$(tr -d ' \t\r\n' < "$APP_DIR/data/panel-cmd.conf")"
+  fi
   PANEL_CMD="${PANEL_CMD:-unmi}"
   install -m 755 "$SRC_DIR/unmi-cli.sh" "/usr/local/bin/$PANEL_CMD"
   echo "    已安装控制台命令：$PANEL_CMD"

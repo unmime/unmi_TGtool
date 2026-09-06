@@ -18,7 +18,7 @@
 set -euo pipefail
 
 # ---- 常量 ----
-VERSION="v1.0.0.1"
+VERSION="v1.0.0.2"
 REPO="unmime/unmi_TGtool"
 TAR_URL="https://github.com/${REPO}/releases/download/${VERSION}/unmi_TGtool.tar.gz"
 APP_DIR="/opt/unmi_TGtool"
@@ -109,7 +109,14 @@ PANEL_CMD="unmi"
 install_cli() {
   step "安装 unmi 控制台"
   # 重装时沿用用户之前改过的命令名，别把人家的习惯打回 unmi
-  local saved; saved="$(tr -d ' \t\r\n' < "$APP_DIR/data/panel-cmd.conf" 2>/dev/null)"
+  # 必须先判断文件存在再读：全新安装时 data/ 目录都还没有，
+  # 直接 `< 文件` 会让 bash 报重定向错误 —— 这种错误 2>/dev/null 拦不住，
+  # 而本脚本开了 set -e + pipefail，连 `cat f 2>/dev/null | tr ...` 也会因为
+  # pipefail 拿到非 0 而中断安装。用 -f 先挡一道最干净。
+  local saved=""
+  if [ -f "$APP_DIR/data/panel-cmd.conf" ]; then
+    saved="$(tr -d ' \t\r\n' < "$APP_DIR/data/panel-cmd.conf")"
+  fi
   [ -n "$saved" ] && PANEL_CMD="$saved"
   install -m 755 "$APP_DIR/unmi-cli.sh" "/usr/local/bin/$PANEL_CMD"
   ok "以后敲 ${C_BOLD}${PANEL_CMD}${C_RESET} 打开控制台"

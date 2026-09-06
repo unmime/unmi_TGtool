@@ -68,6 +68,25 @@ cleanup_tmp() {
 }
 trap cleanup_tmp EXIT INT TERM
 
+# 面板自更新检测。
+#
+# 背景：bash 是「边读边执行」的，而且记录的是文件字节偏移。
+# 一键更新 / scp 换掉脚本文件后，已经在跑的这个进程**不会**读到新代码；
+# 更糟的是新文件一旦更长，bash 从旧偏移继续读，执行到的是错位的代码 ——
+# 表现就是「磁盘上明明是新版，界面上还是旧页面」，用户会以为更新没生效。
+# 所以每次渲染主菜单前比对一次「大小+修改时间」，变了就自动 exec 一份新的。
+PANEL_SELF="${BASH_SOURCE[0]:-$0}"
+PANEL_SIG=""
+# 取修改时间：GNU stat 用 -c %Y，BSD(含 macOS) 用 -f %m，两种都试一遍。
+# 不能直接用 date -r —— GNU 的 -r 后面跟文件，BSD 的 -r 后面跟时间戳，语义正好相反。
+panel_mtime() {
+  stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null || echo 0
+}
+panel_sig() {
+  [ -f "$1" ] || return 0
+  printf '%s-%s' "$(wc -c < "$1" 2>/dev/null)" "$(panel_mtime "$1")"
+}
+
 # 分割线（贴合主题的暗青色，区分每一屏/每次操作）
 divider() { echo -e "${C_DIM}${C_CYAN}  ──────────────────────────────────────────${C_RESET}"; }
 
@@ -1107,6 +1126,16 @@ EOF
 }
 
 main_menu() {
+  # 面板文件被换过 → 载入新版本（正在跑的这份是旧代码，还可能是错位的）
+  if [ -z "$PANEL_SIG" ]; then
+    PANEL_SIG="$(panel_sig "$PANEL_SELF")"
+  elif [ "$(panel_sig "$PANEL_SELF")" != "$PANEL_SIG" ]; then
+    echo
+    warn "检测到面板已更新，正在载入新版本…"
+    sleep 1
+    exec "$PANEL_SELF"
+  fi
+
   clear 2>/dev/null || true
   divider
   banner
