@@ -420,11 +420,11 @@ class Plugin(Module):
             self.ctx.answer(cb_id, u"已更新")
             return True
         if action == "cur" and len(parts) >= 3 and parts[2] == "reset":
-            st["display"] = list(fx._DEFAULT_DISPLAY)
+            st["display"] = []
             fx.save_settings(st)
             t, kb = _menu_main()
             self.ctx.edit(chat_id, message_id, t, kb)
-            self.ctx.answer(cb_id, u"✅ 展示货币已重置为默认")
+            self.ctx.answer(cb_id, u"✅ 展示货币已清空")
             return True
         if action == "cur" and len(parts) >= 3 and parts[2] == "typein":
             _PENDING_TYPEIN[chat_id] = "fiat"
