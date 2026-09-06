@@ -75,12 +75,8 @@ def _menu_main():
             disp_txt += u" 等%d种" % len(disp)
     else:
         disp_txt = u"（还没勾选 · 换算时会引导你设置）"
-    src = u"内置（open.er-api.com）"
-    if st["active_api"]:
-        for a in st["apis"]:
-            if a["id"] == st["active_api"]:
-                src = a["name"]
-                break
+    src = next((a["name"] for a in fx.BUILTIN_APIS if a["id"] == st["source"]),
+               st["source"])
     text = (
         u"💱 <b>汇率换算</b>\n\n"
         u"直接发金额就能换，比如 <code>22人民币</code> / <code>$100</code> / <code>100usd</code>\n\n"
@@ -339,13 +335,6 @@ class Plugin(Module):
                 self.ctx.answer(cb_id, u"⚠️ 这个源不存在")
                 return True
             st["source"] = src
-            fx.save_settings(st)
-            fx.load_rates(force=True)       # 切源后立刻刷新缓存
-            t, kb = _menu_api()
-            self.ctx.edit(chat_id, message_id, t, kb)
-            self.ctx.answer(cb_id, u"✅ 已切换")
-            return True
-            st["active_api"] = api_id
             fx.save_settings(st)
             fx.load_rates(force=True)       # 切源后立刻刷新缓存
             t, kb = _menu_api()
