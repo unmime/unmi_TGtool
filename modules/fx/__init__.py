@@ -408,12 +408,12 @@ class Plugin(Module):
             return True
         if action == "cur" and len(parts) >= 4 and parts[2] == "toggle":
             code, page = parts[3], int(parts[4])
-            disp = set(st["display"])
+            disp = list(st["display"])
             if code in disp:
-                disp.discard(code)
+                disp.remove(code)
             else:
-                disp.add(code)
-            st["display"] = sorted(disp)
+                disp.append(code)
+            st["display"] = disp
             fx.save_settings(st)
             t, kb = _menu_picker("cur", page)
             self.ctx.edit(chat_id, message_id, t, kb)
@@ -509,10 +509,10 @@ class Plugin(Module):
                     u"（%s）" % u"、".join(not_found[:5]) if not_found else "", tip))
             return
         st = fx.get_settings()
-        disp = set(st["display"])
+        disp = list(st["display"])
         newly = [c for c in found if c not in disp]
-        disp |= set(found)
-        st["display"] = sorted(disp)
+        disp.extend(newly)          # 保持用户添加顺序：原有的在前，新的按输入顺序在后
+        st["display"] = disp
         fx.save_settings(st)
         _PENDING_TYPEIN.pop(chat_id, None)
         lines = [u"✅ <b>已识别并勾选 %d 种</b>：" % len(found)]
