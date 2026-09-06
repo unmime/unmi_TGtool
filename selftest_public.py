@@ -62,9 +62,9 @@ def main_test():
     reg = Registry(ctx)
     mods = reg.load(cfg.enabled)
     reg.start()
-    disp = main.Dispatcher(cfg, ctx, mods)
+    disp = main.Dispatcher(cfg, ctx, reg)
 
-    print("[1] 开箱默认：只装计算器")
+    print("[1] 开箱默认：全新环境只装计算器（fx 用 /modules 启用）")
     check("默认只加载 calc", [m.name for m in mods], ["calc"])
 
     print("[2] 计算器")
@@ -88,7 +88,7 @@ def main_test():
 
     print("[6] 普通聊天兜底")
     main._LAST_HINT["t"] = 0.0
-    check("非算式提示", any(u"算式" in t for t in run("hello")), True)
+    check("非算式保持沉默（兜底提示已按用户要求删除）", run("hello"), [])
 
     print("[8] 模块注册表：坏模块 / 依赖 / 重名 都要被拦住")
     reg2 = Registry(ctx)
@@ -135,7 +135,10 @@ def main_test():
 
     print("[7] 热插拔 demo")
     import modules.demo as demo_mod
-    disp2 = main.Dispatcher(cfg, ctx, mods + [demo_mod.Plugin(ctx)])
+    reg2 = Registry(ctx)
+    reg2.modules = mods + [demo_mod.Plugin(ctx)]
+    reg2.by_name = {m.name: m for m in reg2.modules}
+    disp2 = main.Dispatcher(cfg, ctx, reg2)
     SENT.clear()
     disp2.handle_message({"chat": {"id": CHAT}, "text": "/ping"})
     check("demo /ping", any("pong" in t for t in texts()), True)

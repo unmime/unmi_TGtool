@@ -66,7 +66,21 @@ cleanup_tmp() {
     [ -n "$d" ] && rm -rf "$d"
   done
 }
-trap cleanup_tmp EXIT INT TERM
+# 备用屏幕（alternate screen）：就是 vim / less 用的那套机制。
+# 进面板时切入备用屏 —— 备用屏没有滚动历史，不管用户怎么滚都只会看到当前页面；
+# 退出时切回主屏，用户原来的终端内容原样还原，一行都不会被面板弄乱。
+# 这比「清屏」彻底：清屏在部分终端上清不掉回滚缓冲区，用户往上滚还是能看到旧页面。
+ALT_ON=""
+enter_alt() {
+  printf '\033[?1049h\033[2J\033[H' 2>/dev/null || true
+  ALT_ON=1
+}
+leave_alt() {
+  [ -n "$ALT_ON" ] || return 0
+  printf '\033[?1049l' 2>/dev/null || true
+  ALT_ON=""
+}
+trap 'leave_alt; cleanup_tmp' EXIT INT TERM
 
 # 面板自更新检测。
 #
@@ -87,8 +101,21 @@ panel_sig() {
   printf '%s-%s' "$(wc -c < "$1" 2>/dev/null)" "$(panel_mtime "$1")"
 }
 
+# 检测面板脚本是否被更新过，更新过就 exec 一份新的。
+# 主菜单和管理页的循环里都要调 —— 用户可能一直待在管理页里，只查主菜单会漏。
+check_self_update() {
+  if [ -z "$PANEL_SIG" ]; then
+    PANEL_SIG="$(panel_sig "$PANEL_SELF")"
+  elif [ "$(panel_sig "$PANEL_SELF")" != "$PANEL_SIG" ]; then
+    echo
+    warn "检测到面板已更新，正在载入新版本…"
+    sleep 1
+    exec "$PANEL_SELF"
+  fi
+}
+
 # 分割线（贴合主题的暗青色，区分每一屏/每次操作）
-divider() { echo -e "${C_DIM}${C_CYAN}  ──────────────────────────────────────────${C_RESET}"; }
+divider() { echo -e "${C_DIM}${C_CYAN}  $(printf '─%.0s' $(seq 1 $(( PANEL_W - 2 ))))${C_RESET}"; }
 
 # 显示宽度：中文/全角/emoji 算 2，ASCII 算 1（用 python 精确算，退化到字符数）
 _disp_width() {
@@ -113,6 +140,39 @@ normalize_proxy() {
 proxy_looks_ok() {
   printf '%s' "$1" | grep -qE \
     '^[a-zA-Z][a-zA-Z0-9+.-]*://([A-Za-z0-9._~%+:-]+@)?(\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9._~%-]+):[0-9]{1,5}/?$'
+}
+
+# 清屏并让光标回到左上角。
+# 用 ANSI 转义而不是 clear 命令：不依赖 ncurses，精简系统上也能用。
+# 每个页面渲染前都调它 —— 不然内容一直往下堆，几轮操作后满屏都是旧字。
+PANEL_W=64   # 面板总宽度（格子数），cls 里按终端宽度刷新
+
+# 把一行按面板宽度居中输出（不带换行，调用方自己 echo）。
+# 缩进用「光标右移」指令而不是前导空格 —— 部分客户端会把行首空白吞掉，
+# 控制序列不会被当空白处理。0 格时也发（\033[0C 无副作用），省一个分支。
+ctr() {
+  local used lead
+  used="$(_disp_width "$(_plain "$1")")"
+  lead=$(( (PANEL_W - used) / 2 )); [ "$lead" -lt 0 ] && lead=0
+  printf '\033[%dC%s' "$lead" "$1"
+}
+
+# 面板宽度跟随终端：占满可用宽度。窄于 60 保底（再窄排版会碎），
+# 宽于 100 封顶（再宽眼睛要来回扫，反而不和谐）。
+_refresh_w() {
+  local w=""
+  w="$(tput cols 2>/dev/null || true)"
+  [ -z "$w" ] && w="${COLUMNS:-}"
+  case "$w" in ''|*[!0-9]*) w=80 ;; esac
+  [ "$w" -lt 60 ] && w=60
+  [ "$w" -gt 100 ] && w=100
+  PANEL_W=$w
+}
+
+cls() {
+  # 已在备用屏里，2J 清掉上一页即可（备用屏本身没有滚动历史）
+  printf '\033[2J\033[H' 2>/dev/null || true
+  _refresh_w   # 每页都重新取一次终端宽度，窗口拉大了面板跟着变大
 }
 
 # 版本号比较：只看数字段（忽略前缀 v），逐段比大小。
@@ -141,7 +201,10 @@ _plain() { printf '%s' "$1" | sed 's/\x1b\[[0-9;]*m//g'; }
 # 手敲空格对不齐 —— 「删除此机器人」比「查看状态」宽 4 格，靠肉眼数空格迟早错位。
 # 用法: menu_row 「A」 添加机器人 「T」 发送测试 …
 menu_row() {
-  local w="${MENU_COL_W:-19}" out="" k label cur pad
+  # 列宽随面板宽度走：一行 N 个选项就均分（面板宽 - 2 格缩进）
+  local cnt=$(( ($# + 1) / 2 ))
+  [ "$cnt" -lt 1 ] && cnt=1
+  local w=$(( (PANEL_W - 2) / cnt )) out="" k label cur pad
   while [ "$#" -gt 0 ]; do
     k="$1"; label="${2-}"; shift; [ "$#" -gt 0 ] && shift
     cur="${C_CYAN}${k}${C_RESET} ${label}"
@@ -151,7 +214,8 @@ menu_row() {
     [ "$pad" -lt 1 ] && pad=1
     out="${out}${cur}$(printf '%*s' "$pad" '')"
   done
-  printf '  %s\n' "$out" | sed 's/[[:space:]]*$//'   # 末列补的空格没用，去掉
+  # 整行居中：去掉末列补的空格，按实际宽度算左边距
+  printf '  %s\n' "$out"
 }
 
 # 加粗框：把传入的每一行内容用粗线框框住。
@@ -161,13 +225,14 @@ draw_box() {
   local align="center"
   case "${1:-}" in left|center) align="$1"; shift ;; esac
   # 宽度 = max(最长行, BOX_MIN)；BOX_MIN 可让实例页标题框对齐主面板的宽度
-  local maxlen="${BOX_MIN:-0}" line plain len lpad rpad
+  # 框体占满面板宽度（更大气），内容行在框内居中/左对齐。
+  # 内容超宽时（比如带长用户名）框体随内容加宽，PANEL_W 只是下限。
+  local maxlen=$(( PANEL_W - 4 )) line plain len lpad rpad
   for line in "$@"; do
     plain="$(_plain "$line")"
     len="$(_disp_width "$plain")"
     [ "$len" -gt "$maxlen" ] && maxlen="$len"
   done
-  LAST_BOX_INNER=$maxlen   # 记录本次内容宽（全局），供实例页标题框对齐主面板
   echo -e "${C_BOLD}${C_CYAN}╔$(printf '═%.0s' $(seq 1 $(( maxlen + 2 ))))╗${C_RESET}"
   for line in "$@"; do
     plain="$(_plain "$line")"
@@ -289,6 +354,7 @@ display_name() {  # $1=name $2=dir $3=env
 #===============================================================================
 
 add_bot() {
+  cls
   echo
   divider
   echo -e "${C_BOLD}  添加机器人${C_RESET}  ${C_DIM}（共 3 步：Token → Chat ID → 备注）${C_RESET}"
@@ -462,6 +528,7 @@ cur_proxy_args() {
 }
 
 inst_status() {
+  cls
   echo -e "  名称:   ${C_BOLD}$CUR_LABEL${C_RESET}（实例 ${CUR_NAME}）"
   echo -e "  运行:   $(svc_state "$CUR_SVC")"
   echo    "  目录:   $CUR_DIR"
@@ -508,6 +575,7 @@ save_env() {  # 用法: save_env KEY=VAL [KEY=VAL ...]（作用于当前实例 $
 }
 
 inst_config() {
+  cls
   local token chat
   echo -e "  ${C_DIM}（随时输入 0 返回菜单）${C_RESET}"
   ask token "  Bot Token: " || return
@@ -553,6 +621,7 @@ inst_proxy() {
 
 # 添加/修改备注（存在 env 的 INSTANCE_NOTE，标题栏显示）
 inst_note() {
+  cls
   local cur; cur="$(cur_val INSTANCE_NOTE)"
   [ -n "$cur" ] && echo "  当前备注：$cur"
   echo -e "  ${C_DIM}（输入 0 返回菜单）${C_RESET}"
@@ -563,10 +632,14 @@ inst_note() {
   [ -n "$cur" ] && ok "备注已保存：$cur" || ok "备注已清除"
 }
 
-inst_log()     { journalctl -u "$CUR_SVC" -n 30 --no-pager; }
+inst_log() {
+  cls
+  journalctl -u "$CUR_SVC" -n 30 --no-pager
+}
 
 # 重启当前这个机器人（单个机器人重启从主页挪到了这里）
 inst_restart() {
+  cls
   echo
   draw_box "🤖 $CUR_LABEL" "${C_DIM}确认重启这个机器人？${C_RESET}"
   echo
@@ -622,6 +695,7 @@ inst_update() {
 }
 
 inst_uninstall() {
+  cls
   # 只删除当前这个机器人（它的配置/服务/目录），不动控制台本身和其它机器人
   echo
   draw_box left "${C_RED}${C_BOLD}删除机器人${C_RESET}" \
@@ -650,11 +724,12 @@ inst_uninstall() {
 inst_menu() {
   local n _note _st
   while :; do
+    check_self_update
+    cls
     _note="$(cur_val INSTANCE_NOTE)"
     _st="$(svc_state "$CUR_SVC" en)"
     echo
     # 标题框宽度对齐主面板（用主面板实例列表框的宽度），不再只按标题宽度收窄
-    local BOX_MIN="${LAST_BOX_INNER:-0}"
     if [ -n "$_note" ]; then
       draw_box "🤖 $CUR_LABEL ${C_PINK}（${_note}）${C_RESET}" "${C_DIM}$CUR_SVC${C_RESET} · $_st"
     else
@@ -742,6 +817,7 @@ _pick_bot() {
 
 # 主页：发送测试（选一个，或全部）
 do_send_test() {
+  cls
   echo -e "${C_BOLD}  发送测试${C_RESET}（选哪个机器人，或全部）"
   _pick_bot "「a」全部发送" || return
   if [ "$PICKED" = "all" ]; then
@@ -758,6 +834,7 @@ do_send_test() {
 
 # 主页：配置全局代理（一次配置，所有机器人共用，并同步重启）
 do_proxy_global() {
+  cls
   echo -e "${C_BOLD}  配置全局代理${C_RESET} ${C_DIM}（所有机器人共用；安装时已配的话这里可改）${C_RESET}"
   local cur; cur="$(global_proxy)"
   [ -n "$cur" ] && echo "  当前代理: $cur" || echo "  当前代理: 直连（未配置）"
@@ -845,6 +922,7 @@ do_proxy_global() {
 
 # 主页：改打开面板用的命令名（默认 unmi）
 do_panel_cmd() {
+  cls
   local cur; cur="$(panel_cmd)"
   echo
   draw_box left "${C_BOLD}面板命令名${C_RESET}" \
@@ -907,6 +985,7 @@ do_panel_cmd() {
 
 # 主页：重启面板（重启所有机器人服务，再重载控制台）
 do_restart_panel() {
+  cls
   local list; list="$(list_instances)"
   if [ -z "$list" ]; then
     echo
@@ -982,6 +1061,7 @@ do_restart_panel() {
 
 # 主页：开 / 关机器人（选一个；运行中→停止，已停止→启动）
 do_toggle_bot() {
+  cls
   echo -e "${C_BOLD}  开 / 关机器人${C_RESET}（选哪个）"
   _pick_bot || return
   local n d e s label act verb
@@ -1009,6 +1089,7 @@ do_toggle_bot() {
 
 # 主页：一键更新（更新框架 + 所有机器人 + unmi 命令，重启全部）
 do_update_all() {
+  cls
   echo -e "${C_BOLD}  一键更新${C_RESET}"
   local latest cur; cur="未知"; [ -f "$BASE/VERSION" ] && cur="$(cat "$BASE/VERSION")"
   echo "    当前: $cur"
@@ -1065,6 +1146,7 @@ do_update_all() {
 
 # 主页：卸载整个面板（删除所有机器人 + 控制台本身）
 do_uninstall_panel() {
+  cls
   # 列出会被删掉的机器人，让用户确认前知道自己要失去什么
   local lines=("${C_RED}将删除：所有机器人的服务、配置、目录${C_RESET}"
                "${C_RED}代码框架 ${BASE}、控制台命令${C_RESET}")
@@ -1126,17 +1208,8 @@ EOF
 }
 
 main_menu() {
-  # 面板文件被换过 → 载入新版本（正在跑的这份是旧代码，还可能是错位的）
-  if [ -z "$PANEL_SIG" ]; then
-    PANEL_SIG="$(panel_sig "$PANEL_SELF")"
-  elif [ "$(panel_sig "$PANEL_SELF")" != "$PANEL_SIG" ]; then
-    echo
-    warn "检测到面板已更新，正在载入新版本…"
-    sleep 1
-    exec "$PANEL_SELF"
-  fi
-
-  clear 2>/dev/null || true
+  check_self_update
+  cls
   divider
   banner
   echo -e "  ${C_BOLD}unmi_TGtool 控制台${C_RESET}  ${C_DIM}集中管理本机的 Telegram 机器人${C_RESET}"
@@ -1186,7 +1259,7 @@ EOF
     local lines=() row
     for row in "${rowlines[@]}"; do
       lines+=("$row")
-      lines+=("${C_DIM}$(printf '═%.0s' $(seq 1 "$maxrow"))${C_RESET}")
+      lines+=("${C_DIM}$(printf '═%.0s' $(seq 1 $(( PANEL_W - 4 ))))${C_RESET}")
     done
     echo
     draw_box left "${C_BOLD}已装机器人：${C_RESET}" "${lines[@]}"
@@ -1226,6 +1299,7 @@ main() {
   case "${1:-}" in
     add|a) add_bot; exit 0 ;;        # unmi add —— 直接进添加流程（安装脚本首次调用）
   esac
+  enter_alt                          # 切备用屏：面板独占一屏，退出时还原终端
   while :; do
     main_menu
   done

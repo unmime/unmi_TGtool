@@ -19,7 +19,10 @@
 import os
 import signal
 import sys
+import glob
+import shutil
 import threading
+import urllib.request
 import time
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -73,11 +76,103 @@ def _call(mod, meth, *a):
 # 调度
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# 模块目录（可安装/卸载的模块清单 + 各自的文件列表）
+# ---------------------------------------------------------------------------
+# 安装 = 从公开仓库按文件列表拉取到本地；卸载 = 删除代码 + __pycache__ + 数据。
+# 目录是静态的（不依赖模块是否已装），这样卸载后模块仍出现在菜单里可重装。
+_REPO_RAW = "https://raw.githubusercontent.com/unmime/unmi_TGtool/main/"
+
+_MODULE_CATALOG = {
+    "calc": {
+        "title": u"计算器",
+        "files": ["modules/calc/__init__.py", "modules/calc/engine.py"],
+    },
+    "fx": {
+        "title": u"汇率换算",
+        "files": ["modules/fx/__init__.py", "modules/fx/engine.py"],
+    },
+    "demo": {
+        "title": u"示例模块",
+        "files": ["modules/demo.py"],
+    },
+}
+
+
+def _mod_installed(mid):
+    """模块代码是否在本地。"""
+    return os.path.isdir(os.path.join(BASE_DIR, "modules", mid)) or \
+        os.path.isfile(os.path.join(BASE_DIR, "modules", mid + ".py"))
+
+
+def _download_module(mid):
+    """从公开仓库拉取模块文件到本地。成功返回 None，失败返回错误说明。"""
+    meta = _MODULE_CATALOG.get(mid)
+    if not meta:
+        return u"目录里没有这个模块"
+    for rel in meta["files"]:
+        url = _REPO_RAW + rel
+        try:
+            with urllib.request.urlopen(url, timeout=20) as r:
+                body = r.read()
+        except Exception as e:                       # noqa: BLE001
+            return u"下载失败（%s）：%s" % (rel, e)
+        if not body or len(body) < 20:
+            return u"下载内容异常（%s）" % rel
+        dest = os.path.join(BASE_DIR, rel)
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        with open(dest, "wb") as fh:
+            fh.write(body)
+    return None
+
+
+def _remove_module(mid):
+    """彻底删除模块：代码目录/文件 + __pycache__ + 该模块的数据文件。"""
+    removed = []
+    for path in (os.path.join(BASE_DIR, "modules", mid),
+                 os.path.join(BASE_DIR, "modules", mid + ".py")):
+        if os.path.isdir(path):
+            shutil.rmtree(path, ignore_errors=True)
+            removed.append(os.path.basename(path))
+        elif os.path.isfile(path):
+            try:
+                os.remove(path)
+                removed.append(os.path.basename(path))
+            except OSError:
+                pass
+    for pc in glob.glob(os.path.join(BASE_DIR, "modules", "__pycache__", mid + "*")):
+        try:
+            os.remove(pc)
+        except OSError:
+            pass
+    # 数据文件（fx_settings.json / calc_settings.json / fx_rates.json 这类 <id>_*）
+    data_dir = os.path.join(BASE_DIR, "data")
+    for f in glob.glob(os.path.join(data_dir, mid + "_*.json")):
+        try:
+            os.remove(f)
+            removed.append(os.path.basename(f))
+        except OSError:
+            pass
+    return removed
+
+
 class Dispatcher(object):
-    def __init__(self, cfg, ctx, modules):
+    def __init__(self, cfg, ctx, registry):
         self.cfg = cfg
         self.ctx = ctx
-        self.modules = modules
+        self.registry = registry
+        self.modules = registry.modules
+
+    def _reload_modules(self):
+        """热重载：停掉全部模块，按最新 enabled 列表重新装载。
+        单个模块出问题只跳过它（registry 的隔离机制），不影响其它模块。"""
+        self.registry.stop()
+        self.registry = Registry(self.ctx)
+        self.registry.load(self.cfg.enabled)
+        self.registry.start()
+        self.modules = self.registry.modules
+        _LOG.info("模块已热重载: %s",
+                  ", ".join(m.name for m in self.modules) or "（无）")
 
     # ------------------------------------------------------------- 消息
     def handle_message(self, msg):
@@ -115,6 +210,8 @@ class Dispatcher(object):
         # 其余按未知命令处理。若装了处理这三个命令的模块会先接管，到不了这里。
         if cmd in ("help", "start", "menu"):
             self._builtin_help()
+        elif cmd == "modules":
+            self._modules_menu()
         else:
             self.ctx.send("🧭 未知命令：%s，发 /help 看用法。" % text, silent=True)
 
@@ -126,7 +223,7 @@ class Dispatcher(object):
             lines.append("  · <b>%s</b> v%s — %s" % (m.name, m.version, m.description))
         lines.append("")
         lines.append("直接发算式就能算，<code>/calc</code> 打开计算器设置。")
-        lines.append("在 <code>data/modules.json</code> 的 enabled 里增减模块。")
+        lines.append("模块开关：<code>/modules</code>（或在 data/modules.json 里改）。")
         self.ctx.send("\n".join(lines))
 
     # ------------------------------------------------------------- 回调
@@ -140,18 +237,111 @@ class Dispatcher(object):
             self.ctx.answer(cb.get("id"), "")
             return
         _LOG.info("callback: %s", data)
+        if data.startswith("modmgr:"):
+            self._modmgr_callback(data, cb.get("id"), msg)
+            return
         for m in self.modules:
             ok, handled = _call(m, "on_callback", data, cb.get("id"), msg)
             if ok and handled:
                 return
         self.ctx.answer(cb.get("id"), "")
 
+    # ------------------------------------------------------------- 模块管理
+    def _modules_kb(self):
+        """模块管理按钮：按目录列全部模块，已装的给「卸载」，未装的给「安装」。"""
+        kb = []
+        for mid, meta in _MODULE_CATALOG.items():
+            installed = _mod_installed(mid)
+            enabled = installed and mid in self.cfg.enabled
+            if installed:
+                mark = u"🟢" if enabled else u"⏸"
+                act = {"text": u"🗑 卸载", "callback_data": "modmgr:askun:%s" % mid}
+            else:
+                mark = u"⬇"
+                act = {"text": u"⬇ 安装", "callback_data": "modmgr:install:%s" % mid}
+            kb.append([{"text": u"%s %s" % (mark, meta["title"]),
+                        "callback_data": "modmgr:info:%s" % mid}, act])
+        kb.append([{"text": u"❌ 收起", "callback_data": "modmgr:close"}])
+        return kb
+
+    def _modules_menu(self):
+        """/modules —— 模块安装/卸载面板。"""
+        text = (u"🧩 <b>模块管理</b>\n\n"
+                u"🟢 在用 · ⏸ 已装未启用 · ⬇ 可下载\n"
+                u"卸载会删掉代码和配置；安装从仓库拉取。")
+        self.ctx.send(text, buttons=self._modules_kb())
+
+    def _modmgr_callback(self, data, cb_id, message):
+        chat_id = str((message.get("chat") or {}).get("id", ""))
+        message_id = message.get("message_id")
+        parts = data.split(":")
+        action = parts[1] if len(parts) > 1 else ""
+        mid = parts[2] if len(parts) > 2 else ""
+        meta = _MODULE_CATALOG.get(mid, {})
+
+        if action == "close":
+            self.ctx.delete(chat_id, message_id)
+            self.ctx.answer(cb_id, u"已收起")
+            return
+
+        if action == "open":
+            text = (u"🧩 <b>模块管理</b>\n\n"
+                    u"🟢 在用 · ⏸ 已装未启用 · ⬇ 可下载\n"
+                    u"卸载会删掉代码和配置；安装从仓库拉取。")
+            self.ctx.edit(chat_id, message_id, text, self._modules_kb())
+            self.ctx.answer(cb_id, "")
+            return
+
+        if action == "info":
+            for r in discover():
+                if r["id"] == mid:
+                    self.ctx.answer(cb_id, u"%s v%s · %s" % (
+                        r["name"], r["version"], r["description"] or u"（无描述）"))
+                    return
+            self.ctx.answer(cb_id, u"%s（未安装）" % meta.get("title", mid))
+            return
+
+        if action == "askun":
+            # 卸载是破坏性操作，先确认
+            text = u"🗑 <b>确认卸载「%s」？</b>\n\n会删掉代码、缓存和配置，之后用 /modules 可重新安装。" % meta.get("title", mid)
+            kb = [[{"text": u"✅ 确认卸载", "callback_data": "modmgr:uninstall:%s" % mid}],
+                  [{"text": u"‹ 返回", "callback_data": "modmgr:open"}]]
+            self.ctx.edit(chat_id, message_id, text, kb)
+            self.ctx.answer(cb_id, "")
+            return
+
+        if action == "uninstall":
+            removed = _remove_module(mid)
+            enabled = [m for m in self.cfg.enabled if m != mid]
+            self.cfg.save_enabled(enabled)
+            self._reload_modules()
+            text = u"✅ 已卸载「%s」（删掉 %d 项）" % (meta.get("title", mid), len(removed))
+            self.ctx.edit(chat_id, message_id, text, self._modules_kb())
+            self.ctx.answer(cb_id, u"🗑 已卸载")
+            return
+
+        if action == "install":
+            self.ctx.answer(cb_id, u"⬇ 正在从仓库拉取…")
+            err = _download_module(mid)
+            if err:
+                self.ctx.answer(cb_id, u"⚠️ 安装失败")
+                self.ctx.send(u"⚠️ 安装「%s」失败：%s" % (meta.get("title", mid), err))
+                return
+            if mid not in self.cfg.enabled:
+                self.cfg.save_enabled(self.cfg.enabled + [mid])
+            self._reload_modules()
+            self.ctx.edit(chat_id, message_id,
+                          u"✅ 已安装「%s」并启用" % meta.get("title", mid),
+                          self._modules_kb())
+            self.ctx.answer(cb_id, u"✅ 已安装")
+            return
+
+        self.ctx.answer(cb_id, u"未知操作")
+
     # ------------------------------------------------------------- 兜底
     def _fallback(self):
-        if time.time() - _LAST_HINT["t"] > 120:
-            _LAST_HINT["t"] = time.time()
-            self.ctx.send(
-                "🧭 直接发算式就能算，/help 看命令，/calc 打开设置。", silent=True)
+        # 没有任何模块认领的消息：保持沉默，不再打扰用户（用户明确要求删掉提示）。
+        return
 
     # ------------------------------------------------------------- 报告
     def run_report(self, kind):
@@ -203,7 +393,7 @@ def build(cfg):
 
     if registry.skipped:
         _LOG.error("有 %d 个模块没加载成（见上面的原因）", len(registry.skipped))
-    return ctx, registry, Dispatcher(cfg, ctx, registry.modules)
+    return ctx, registry, Dispatcher(cfg, ctx, registry)
 
 
 def main():
@@ -257,6 +447,7 @@ def main():
     cmds = []
     for m in reg.modules:
         cmds.extend(getattr(m, "commands", None) or [])
+    cmds.append({"command": "modules", "description": "🧩 模块管理（开关/卸载）"})
     cmds.append({"command": "help", "description": "❓ 使用说明"})
     _ctx.setup_commands(
         cmds,

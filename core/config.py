@@ -61,3 +61,14 @@ class Config(object):
 
     def modules_file(self):
         return os.path.join(self.data_dir, MODULES_FILE)
+
+    def save_enabled(self, enabled):
+        """把模块开关写回 modules.json 并更新内存（模块管理器用）。"""
+        self.enabled = [str(m) for m in enabled]
+        path = self.modules_file()
+        try:
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump({"enabled": self.enabled}, fh,
+                          ensure_ascii=False, indent=2)
+        except Exception as e:                       # noqa: BLE001
+            _LOG.error("写 %s 失败：%s", path, e)
