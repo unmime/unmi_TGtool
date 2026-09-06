@@ -115,7 +115,7 @@ def _menu_main():
         u"直接发金额就能换，比如 <code>22人民币</code> / <code>zg</code> / <code>$100</code> / <code>100usd</code>\n\n"
         u"🌐 展示货币：%s\n"
         u"🎯 默认目标：%s（%s）\n"
-        u"%s\n"
+        u"%s\n\n"
         u"💵 汇率源：%s\n"
         u"%s" % (
             disp_txt, fx.cn_name(st["target"]), st["target"],
