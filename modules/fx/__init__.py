@@ -239,6 +239,15 @@ def _disp_width(text):
     return w
 
 
+def _center_text(text):
+    """整块按最长行居中（前置空格补齐；宽度按 CJK=2、剥 HTML 标签计算）。"""
+    lines = text.split(u"\n")
+    widths = [_disp_width(l) for l in lines]
+    max_w = max(widths)
+    return u"\n".join(u" " * ((max_w - w) // 2) + l
+                      for l, w in zip(lines, widths))
+
+
 def _divider(header_text):
     """按标题行的显示宽度生成分割线（─ 按 1 格计，略留余量）。"""
     return u"─" * max(4, _disp_width(header_text))
@@ -669,7 +678,7 @@ class Plugin(Module):
             out = _fmt_pair(amount, frm, to, data, expr)
             if hint:
                 out += u"\n%s" % hint
-            return (out, None)
+            return (_center_text(out), None)
         # 未指定目标：法币源走法币展示单，加密源走加密展示单（互不掺和）
         st = fx.get_settings()
         if frm in fx.CRYPTO_NAMES:
@@ -680,7 +689,7 @@ class Plugin(Module):
                               buttons=[[{"text": u"➕️ 添加加密货币",
                                          "callback_data": "%s:cur:typeinc:0" % _CB}]])
                 return None
-            return (_fmt_targets(amount, frm, targets, data, expr), None)
+            return (_center_text(_fmt_targets(amount, frm, targets, data, expr)), None)
         targets = [c for c in st["display"]
                    if c != frm and c not in fx.CRYPTO_NAMES and c in rates]
         if not targets:
@@ -692,4 +701,4 @@ class Plugin(Module):
         hint = fx.euro_country_hint(text) if frm == "EUR" else None
         if hint:
             out += u"\n%s" % hint
-        return (out, None)
+        return (_center_text(out), None)
