@@ -342,6 +342,10 @@ class Plugin(Module):
             return True
         if action == "cryptotoggle":
             st["crypto_on"] = not st.get("crypto_on", False)
+            if not st["crypto_on"]:
+                # 关掉时把加密币从展示货币里剔除 —— 关了就彻底不出现
+                st["display"] = [c for c in st["display"]
+                                 if c not in fx.CRYPTO_NAMES]
             fx.save_settings(st)
             fx.load_rates(force=True)     # 立即重算（合并或剔除加密币）
             t, kb = _menu_main()
