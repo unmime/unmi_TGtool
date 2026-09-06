@@ -371,17 +371,17 @@ class Plugin(Module):
                             else u"加密货币换算已关闭")
             return True
         if action == "csrc" and len(parts) >= 4 and parts[2] == "use":
-                src = parts[3]
-                if not any(a["id"] == src for a in fx.CRYPTO_SOURCES):
-                    self.ctx.answer(cb_id, u"⚠️ 这个源不存在")
-                    return True
-                st["crypto_source"] = src
-                fx.save_settings(st)
-                fx.load_rates(force=True)
-                t, kb = _menu_csrc()
-                self.ctx.edit(chat_id, message_id, t, kb)
-                self.ctx.answer(cb_id, u"✅ 加密货币源已切换")
+            src = parts[3]
+            if not any(a["id"] == src for a in fx.CRYPTO_SOURCES):
+                self.ctx.answer(cb_id, u"⚠️ 这个源不存在")
                 return True
+            st["crypto_source"] = src
+            fx.save_settings(st)
+            fx.load_rates(force=True)
+            t, kb = _menu_api()
+            self.ctx.edit(chat_id, message_id, t, kb)
+            self.ctx.answer(cb_id, u"✅ 加密货币源已切换")
+            return True
         if action == "refresh":
             data = fx.load_rates(force=True)
             t, kb = _menu_main()
