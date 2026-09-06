@@ -195,6 +195,8 @@ def looks_like_expr(text):
         return False
     if _IPV4_RE.search(s) or ":" in s:          # 别把 1.2.3.0/24 或 IPv6 当算式
         return False
+    if s.replace(",", "").replace(".", "").isdigit():
+        return True                             # 纯数字（44 / 1,500 / 3.14）也算算式
     if any(c not in _EXPR_CHARS for c in s):
         return False
     ans_on = bool(get_settings().get("ans_on"))
