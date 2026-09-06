@@ -962,7 +962,8 @@ def calc_msgs(raw):
         except Exception:  # noqa: BLE001  中文转换出错不能影响主结果
             pass
         if tail:
-            msgs.append(("\n".join(tail), None))
+            # 两条之间空一行：紧挨着的时候读法和会计大写容易看串（用户反馈）
+            msgs.append(("\n\n".join(tail), None))
     return msgs
 
 

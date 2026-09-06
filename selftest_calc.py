@@ -166,7 +166,10 @@ def main():
     check("仅大写内容", calc.calc_msgs("66*98")[1][0],
           u"会计大写：<code>陆仟肆佰陆拾捌元整</code>")
     calc.set_settings(conv_mode="both")
-    check("两种都显示", len(calc.calc_msgs("66*98")[1][0].split("\n")), 2)
+    # 读法和会计大写之间空一行（3 行），分隔更清楚
+    check("两种都显示", len(calc.calc_msgs("66*98")[1][0].split("\n")), 3)
+    check("两种都显示中间有空行",
+          "\n\n" in calc.calc_msgs("66*98")[1][0], True)
     for f in ["result", "eq", "paren"]:
         calc.set_settings(fmt=f)
         check("格式 %s 可渲染" % f, bool(calc.calc_msgs("1+1")), True)

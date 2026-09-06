@@ -18,7 +18,7 @@
 set -euo pipefail
 
 # ---- 常量 ----
-VERSION="v1.0.0.3"
+VERSION="v1.0.0.4"
 REPO="unmime/unmi_TGtool"
 # 始终拉 latest，不要把 VERSION 拼进链接。
 #
