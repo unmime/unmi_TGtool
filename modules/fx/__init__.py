@@ -105,17 +105,21 @@ def _menu_main():
                          st.get("crypto_source", "binance"))
         dc = st.get("display_crypto") or []
         dc_txt = u" / ".join(fx.cn_name(c) for c in dc[:5]) if dc else u"还没添加"
-        crypto_line = u"🪙 加密货币（%s）：%s" % (csrc_name, dc_txt)
+        crypto_line = u"🪙 加密货币：%s" % dc_txt
+        csrc_line = u"🪙 加密汇率源：%s" % csrc_name
     else:
         crypto_line = u"🪙 加密货币：关"
+        csrc_line = u""
     text = (
         u"💱 <b>汇率换算</b>\n\n"
         u"直接发金额就能换，比如 <code>22人民币</code> / <code>zg</code> / <code>$100</code> / <code>100usd</code>\n\n"
         u"🌐 展示货币：%s\n"
         u"🎯 默认目标：%s（%s）\n"
+        u"%s\n"
         u"💵 汇率源：%s\n"
         u"%s" % (
-            disp_txt, fx.cn_name(st["target"]), st["target"], src, crypto_line))
+            disp_txt, fx.cn_name(st["target"]), st["target"],
+            crypto_line, src, csrc_line))
     row0 = [{"text": u"➕️ 添加法定货币",
              "callback_data": "%s:cur:typein:0" % _CB}]
     if st["crypto_on"]:       # 关着时不显示加密向导入口
