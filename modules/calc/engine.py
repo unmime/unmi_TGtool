@@ -193,8 +193,10 @@ def looks_like_expr(text):
     s = _normalize(text)
     if not s:
         return False
-    if re.fullmatch(r"\d{1,3}(?:,\d{3})*(?:\.\d+)?|\d+(?:\.\d+)?", s):
+    if len(s) >= 2 and re.fullmatch(
+            r"\d{1,3}(?:,\d{3})*(?:\.\d+)?|\d+(?:\.\d+)?", s):
         return True                             # 纯数字（44 / 1,500 / 3.14）也算算式
+                                                # （单数字如 1 太常出现在聊天里，不响应）
                                                 # （限 0~1 个小数点，IP 形如 8.8.8.8 不误伤）
     if len(s) < 3 or len(s) > MAX_LEN:
         return False
