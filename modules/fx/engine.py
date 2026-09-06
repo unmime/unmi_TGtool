@@ -935,9 +935,16 @@ _UNITS = {
 }
 
 
+# 加密货币符号（有公认符号的才加，没有的靠前面的代码标识）
+_CRYPTO_UNITS = {
+    "BTC": u"₿", "ETH": u"Ξ", "USDT": u"₮", "USDC": u"USDC",
+    "DOGE": u"Ð", "LTC": u"Ł",
+}
+
+
 def unit(code):
-    """金额后缀：' €' / ' ¥' / ' 元'…；没收录的返回 ''。"""
-    u = _UNITS.get(code)
+    """金额后缀：' €' / ' ¥' / ' ₿'…；没收录的返回 ''。"""
+    u = _UNITS.get(code) or _CRYPTO_UNITS.get(code)
     return u" " + u if u else ""
 
 
