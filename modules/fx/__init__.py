@@ -283,7 +283,8 @@ def _fmt_targets(amount, frm, targets, data, expr=None):
             fl or u"　", fx.cn_name(c),
             u"（%s）" % c if fx.cn_name(c) != c else "",
             fx.fmt_amt(out), fx.unit(c)))
-    lines.append(u"\n<i>%s</i>" % data["src"])
+    lines.append(u"────────────")
+    lines.append(u"<i>%s</i>" % data["src"])
     return u"\n".join(lines)
 
 
