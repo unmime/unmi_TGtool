@@ -90,9 +90,7 @@ def _menu_main():
     st = fx.get_settings()
     disp = [c for c in st["display"] if c]
     if disp:
-        disp_txt = u" · ".join(fx.cn_name(c) for c in disp[:5])
-        if len(disp) > 5:
-            disp_txt += u" 等%d种" % len(disp)
+        disp_txt = u" · ".join(fx.cn_name(c) for c in disp)   # 全量显示
     else:
         disp_txt = u"（还没勾选 · 换算时会引导你设置）"
     src = next((a["name"] for a in fx.BUILTIN_APIS if a["id"] == st["source"]),
