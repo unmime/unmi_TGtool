@@ -115,12 +115,13 @@ def _menu_main():
         [{"text": u"🎯 默认目标 ▸", "callback_data": "%s:tgt:page:0" % _CB},
          {"text": u"💵 汇率源 ▸", "callback_data": "%s:api:open" % _CB}],
         [{"text": u"🪙 加密货币换算：%s" % (u"🟢 开" if st["crypto_on"] else u"⚪ 关"),
-          "callback_data": "%s:cryptotoggle" % _CB}],
-        [{"text": u"🪙 输入加密货币关键字添加转换货币",
-          "callback_data": "%s:cur:typeinc:0" % _CB}],
-        [{"text": u"🔄 刷新汇率", "callback_data": "%s:refresh" % _CB},
-         {"text": u"❌ 收起", "callback_data": "%s:close" % _CB}],
-    ]
+          "callback_data": "%s:cryptotoggle" % _CB}]]
+    if st["crypto_on"]:       # 关着时不显示加密向导入口
+        kb.append([{"text": u"🪙 输入加密货币关键字添加转换货币",
+                    "callback_data": "%s:cur:typeinc:0" % _CB}])
+    kb.append([
+        {"text": u"🔄 刷新汇率", "callback_data": "%s:refresh" % _CB},
+        {"text": u"❌ 收起", "callback_data": "%s:close" % _CB}])
     return text, kb
 
 
