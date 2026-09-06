@@ -938,7 +938,9 @@ _UNITS = {
 # 加密货币符号（有公认符号的才加，没有的靠前面的代码标识）
 _CRYPTO_UNITS = {
     "BTC": u"₿", "ETH": u"Ξ", "USDT": u"₮", "USDC": u"USDC",
-    "DOGE": u"Ð", "LTC": u"Ł",
+    "DOGE": u"Ð", "LTC": u"Ł", "BNB": u"BNB", "SOL": u"SOL",
+    "XRP": u"XRP", "ADA": u"ADA", "TRX": u"TRX", "DOT": u"DOT",
+    "AVAX": u"AVAX", "LINK": u"LINK", "SHIB": u"SHIB", "TON": u"TON",
 }
 
 
