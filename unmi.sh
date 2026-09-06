@@ -18,9 +18,18 @@
 set -euo pipefail
 
 # ---- 常量 ----
-VERSION="v1.0.0.2"
+VERSION="v1.0.0.3"
 REPO="unmime/unmi_TGtool"
-TAR_URL="https://github.com/${REPO}/releases/download/${VERSION}/unmi_TGtool.tar.gz"
+# 始终拉 latest，不要把 VERSION 拼进链接。
+#
+# 原因：raw.githubusercontent.com 在部分地区（尤其国内）会被中间缓存钉住 —— 用户拿到的
+# 可能是几小时前的旧安装脚本，而脚本里写死的 VERSION 就会指引它去下**旧版本的包**，
+# 装完界面还是旧的，还以为更新没生效（加 ?t=时间戳 也没用，中间缓存直接忽略查询串）。
+# 改成拉 latest 后，哪怕脚本本身是旧的，装到的也是真·最新版；
+# 装完再从包里读回真实版本号写进 VERSION 文件。
+TAR_URL="https://github.com/${REPO}/releases/latest/download/unmi_TGtool.tar.gz"
+# latest 取不到时的兜底（写死版本），保证脚本离线/异常时仍可安装
+TAR_URL_FALLBACK="https://github.com/${REPO}/releases/download/${VERSION}/unmi_TGtool.tar.gz"
 APP_DIR="/opt/unmi_TGtool"
 
 # ---- 颜色（非终端时自动关闭）----
@@ -84,23 +93,30 @@ check_env() {
 
 # ---- 下载并解压代码框架 ----
 download() {
-  step "下载 unmi_TGtool ${VERSION}"
+  step "下载 unmi_TGtool（最新版）"
   TMP_DIR="$(mktemp -d)"
   trap 'rm -rf "$TMP_DIR"' EXIT
-  if command -v curl >/dev/null 2>&1; then
-    curl -fsSL --connect-timeout 15 "$TAR_URL" -o "$TMP_DIR/pkg.tar.gz" \
-      || { err "下载失败：$TAR_URL"; exit 1; }
-  else
-    wget -q --timeout=15 "$TAR_URL" -O "$TMP_DIR/pkg.tar.gz" \
-      || { err "下载失败：$TAR_URL"; exit 1; }
-  fi
+  local got=1
+  for url in "$TAR_URL" "$TAR_URL_FALLBACK"; do
+    if command -v curl >/dev/null 2>&1; then
+      curl -fsSL --connect-timeout 20 "$url" -o "$TMP_DIR/pkg.tar.gz" 2>/dev/null && { got=0; break; }
+    else
+      wget -q --timeout=20 "$url" -O "$TMP_DIR/pkg.tar.gz" 2>/dev/null && { got=0; break; }
+    fi
+  done
+  [ "$got" = "0" ] || { err "下载失败：$TAR_URL"; exit 1; }
   ok "已下载 $(du -h "$TMP_DIR/pkg.tar.gz" | awk '{print $1}')"
 
   step "安装代码框架到 $APP_DIR"
   mkdir -p "$APP_DIR"
   tar xzf "$TMP_DIR/pkg.tar.gz" -C "$APP_DIR" --strip-components=1
-  echo "$VERSION" > "$APP_DIR/VERSION"
-  ok "框架就绪"
+  # 版本号以包里带的为准（拉的是 latest，实际版本由包决定，不是脚本里写死的那个）
+  if [ -f "$APP_DIR/VERSION" ]; then
+    VERSION="$(tr -d ' \t\r\n' < "$APP_DIR/VERSION")"
+  else
+    echo "$VERSION" > "$APP_DIR/VERSION"
+  fi
+  ok "框架就绪（$VERSION）"
 }
 
 # ---- 装控制台命令（默认 unmi；重装时沿用用户改过的名字）----
