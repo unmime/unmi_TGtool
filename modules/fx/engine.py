@@ -48,7 +48,7 @@ _DEFAULT_SOURCE = "erapi"
 # 加密货币（从 currency-api 补充进来，不管当前用哪个源都有）。
 # 只收主流的，避免 jsdelivr 的 300+ 币把选择页刷爆。
 CRYPTO_NAMES = {
-    "BTC": u"比特币", "ETH": u"以太坊", "USDT": u"泰达币", "BNB": u"币安币",
+    "BTC": u"比特币", "ETH": u"以太坊", "USDT": u"泰达币",     "USDC": u"USD Coin", "BNB": u"币安币",
     "SOL": u"索拉纳", "XRP": u"瑞波币", "ADA": u"艾达币", "DOGE": u"狗狗币",
     "TRX": u"波场币", "DOT": u"波卡币", "LTC": u"莱特币", "AVAX": u"雪崩币",
     "LINK": u"链环币", "SHIB": u"柴犬币", "TON": u"Toncoin",
