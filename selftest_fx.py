@@ -7,6 +7,7 @@ import json
 import os
 import sys
 import tempfile
+import unittest.mock as mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -129,7 +130,7 @@ check("XYZ（不在表里，回退代码）", fx.cn_name("XYZ"), "XYZ")
 print(u"── 7. 缓存读写（临时目录）")
 tmpd = tempfile.mkdtemp()
 fx._CACHE_FILE = os.path.join(tmpd, "rates.json")
-fake = {"rates": RATES, "ts": 1, "src": "test", "fetched_at": 10**12}   # fetched_at 在未来 → 永不过期
+fake = {"rates": RATES, "ts": 1, "src": "test", "api": "erapi", "fetched_at": 10**12}   # fetched_at 在未来 → 永不过期
 with open(fx._CACHE_FILE, "w") as f:
     json.dump(fake, f)
 data = fx.load_rates()
@@ -144,61 +145,57 @@ sug = fx_mod._suggest("USDT", ks)
 check_true("建议以相同字母开头", all(c.startswith("U") for c in sug))
 
 
-print(u"── 9. 设置 v2（迁移与往返）")
+print(u"── 9. 设置 v3（内置源模型 + 清空保持空）")
 tmpd = tempfile.mkdtemp()
 fx.SETTINGS_FILE = os.path.join(tmpd, "fx_settings.json")
-# v1 旧格式自动升级
+# 旧的自定义模型（含 apis/active_api）自动升级成 source
 with open(fx.SETTINGS_FILE, "w") as f:
-    json.dump({"target": "CNY"}, f)
+    json.dump({"target": "CNY", "apis": [{"id": "x"}], "active_api": "x"}, f)
 st = fx.get_settings()
-check("v1→v2 target 保留", st["target"], "CNY")
-check("v1→v2 display 缺省为空（用户自己勾选）", st["display"], [])
-# 清空勾选必须保持空（之前 get_settings 会把空列表回退成默认值 —— 这正是用户报的 bug）
+check("旧模型→v3 target 保留", st["target"], "CNY")
+check("旧模型→v3 source 默认 erapi", st["source"], "erapi")
+check_true("v3 不再有 apis 键", "apis" not in st)
+# 清空勾选保持空（之前 or 默认值会回退，是用户报的 bug）
 st["display"] = []
 fx.save_settings(st)
 check("清空后保持空", fx.get_settings()["display"], [])
+# 切源往返
 st["display"] = ["USD", "JPY"]
-check("v1→v2 apis 默认空", st["apis"], [])
-check("v1→v2 active_api 默认内置", st["active_api"], "")
-# 改后保存再读（往返）
-st["display"] = ["USD", "JPY"]
-st["apis"] = [{"id": "api1", "name": u"我的", "url": "https://x/{base}", "key": "K"}]
-st["active_api"] = "api1"
+st["source"] = "jsdelivr"
 fx.save_settings(st)
 st2 = fx.get_settings()
-check("display 往返", st2["display"], ["USD", "JPY"])
-check("apis 往返", st2["apis"][0]["url"], "https://x/{base}")
-check("active_api 往返", st2["active_api"], "api1")
+check("source 往返", st2["source"], "jsdelivr")
 
-print(u"── 10. new_api 校验")
-try:
-    fx.new_api(u"坏的", "https://x.com/latest")
-    check_true("缺 {base} 必须报错", False)
-except ValueError:
-    check_true("缺 {base} 必须报错", True)
-api = fx.new_api(u"我的", "https://x.com/latest/{base}?k={key}", "K9")
-check("url 保留 {base}", "{base}" in api["url"], True)
-check("key 保存", api["key"], "K9")
-
-print(u"── 11. 自定义 API 拉取（mock urlopen）")
-import unittest.mock as mock
-fake_json = json.dumps({"rates": {"USD": 1.0, "CNY": 6.66, "EUR": 0.9}}).encode()
+print(u"── 11. 内置源解析（mock urlopen，3 种格式）")
 class FakeResp:
     def __init__(self, b): self._b = b
     def read(self): return self._b
     def __enter__(self): return self
     def __exit__(self, *a): return False
-with mock.patch("urllib.request.urlopen", return_value=FakeResp(fake_json)) as m:
-    out = fx.fetch_custom(api)
-check_true("自定义 API 解析", out is not None and out["rates"]["CNY"] == 6.66)
-check("src 用 API 名字", out["src"], u"我的")
+with mock.patch("urllib.request.urlopen", return_value=FakeResp(
+        json.dumps({"result": "success", "rates": {"USD": 1, "CNY": 7.1},
+                    "time_last_update_unix": 123}).encode())):
+    d = fx._fetch_source(fx.BUILTIN_APIS[0])
+check("erapi 解析", (d["rates"]["CNY"], d["src"]), (7.1, "open.er-api.com"))
+with mock.patch("urllib.request.urlopen", return_value=FakeResp(
+        json.dumps({"base": "USD", "rates": {"CNY": 7.2}}).encode())):
+    d = fx._fetch_source(fx.BUILTIN_APIS[1])
+check("frankfurter 解析+补USD", (d["rates"]["CNY"], d["rates"]["USD"]), (7.2, 1.0))
+with mock.patch("urllib.request.urlopen", return_value=FakeResp(
+        json.dumps({"date": "2026-09-06", "usd": {"cny": 7.3, "eur": 0.9}}).encode())):
+    d = fx._fetch_source(fx.BUILTIN_APIS[2])
+check("jsdelivr 解析+大写键", (d["rates"]["CNY"], d["rates"]["EUR"]), (7.3, 0.9))
 with mock.patch("urllib.request.urlopen", side_effect=Exception("断网")):
-    check("拉取失败返回 None", fx.fetch_custom(api), None)
-# fastforex 用 results 字段而不是 rates
-fake_ff = json.dumps({"base": "USD", "results": {"CNY": 6.66, "EUR": 0.9}}).encode()
-with mock.patch("urllib.request.urlopen", return_value=FakeResp(fake_ff)):
-    out = fx.fetch_custom(api)
-check_true("fastforex results 字段也认", out is not None and out["rates"]["CNY"] == 6.66)
+    check("拉取失败返回 None", fx._fetch_source(fx.BUILTIN_APIS[0]), None)
+# 切源后 fetch_rates 走对应源
+tmpd = tempfile.mkdtemp()
+fx.SETTINGS_FILE = os.path.join(tmpd, "fx_settings.json")
+with open(fx.SETTINGS_FILE, "w") as f:
+    json.dump({"source": "jsdelivr"}, f)
+with mock.patch("urllib.request.urlopen", return_value=FakeResp(
+        json.dumps({"usd": {"cny": 7.3}}).encode())):
+    d = fx.fetch_rates()
+check("切源后 fetch_rates 走 jsdelivr", d["rates"]["CNY"], 7.3)
 
 print(u"── 12. 分页与全量代码表")
 codes = ["AAA", "BBB", "CCC"] * 12   # 36 个
@@ -232,18 +229,6 @@ with open(fx.SETTINGS_FILE, "w") as f:
     json.dump(st, f)
 text2, multi2 = fx_mod._fmt_multi(22, "CNY", {"rates": RATES, "src": "test"})
 check_true("源币=展示币时回落单出", not multi2)
-
-print(u"── 14. 自定义源切换后 load_rates 用新源")
-fx.SETTINGS_FILE = os.path.join(tmpd, "fx_settings.json")
-fx._CACHE_FILE = os.path.join(tmpd, "fx_rates.json")
-st = {"target": "CNY", "display": ["USD"], "active_api": "api1",
-      "apis": [{"id": "api1", "name": u"我的", "url": "https://x/{base}", "key": ""}]}
-with open(fx.SETTINGS_FILE, "w") as f:
-    json.dump(st, f)
-with mock.patch("urllib.request.urlopen", return_value=FakeResp(fake_json)):
-    data = fx.load_rates(force=True)
-check_true("走自定义源", data is not None and data.get("api") == "api1")
-check("汇率来自自定义源", data["rates"]["CNY"], 6.66)
 
 print(u"── 15. 货币识别（直接输入选择）")
 check("美金人民币日元澳大利亚印度", fx.recognize(u"美金人民币日元澳大利亚印度")[0],

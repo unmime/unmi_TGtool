@@ -22,10 +22,27 @@ import time
 import urllib.request
 
 # ---------------------------------------------------------------- 常量
-PRIMARY_URL = "https://open.er-api.com/v6/latest/USD"
-FALLBACK_URL = "https://api.frankfurter.app/latest?from=USD"
 CACHE_TTL = 3600          # 汇率缓存 1 小时
 PICKER_PAGE = 24          # 货币选择页每页个数（4 列 × 6 行，按钮不超宽）
+
+# 内置汇率源（免费、无 key，用户可切换，默认 erapi）。
+# parse 标记各自的 JSON 解析方式：erapi=顶层 rates；frankfurter=rates+补 USD=1；
+# jsdelivr=usd 字段且小写键转大写。
+BUILTIN_APIS = [
+    {"id": "erapi", "name": "open.er-api.com", "parse": "erapi",
+     "url": "https://open.er-api.com/v6/latest/USD",
+     "desc": u"默认 · 160+ 币种 · 每日更新"},
+    {"id": "frankfurter", "name": "frankfurter.app", "parse": "frankfurter",
+     "url": "https://api.frankfurter.app/latest?from=USD",
+     "desc": u"欧央行官方 · 30+ 主流币种"},
+    {"id": "jsdelivr", "name": "currency-api", "parse": "jsdelivr",
+     "url": "https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usd.json",
+     "desc": u"CDN 加速 · 200+ 币种 · 每日更新"},
+    {"id": "v4", "name": "exchangerate-api v4", "parse": "erapi",
+     "url": "https://api.exchangerate-api.com/v4/latest/USD",
+     "desc": u"exchangerate-api 免费版 · 160+ 币种"},
+]
+_DEFAULT_SOURCE = "erapi"
 
 # ISO 4217 全表：货币代码 → (国家码, 中文名)。
 # 国旗按 ISO 3166 国家码自动生成（两位国家码 → 区域指示符），不用手维护。
@@ -229,8 +246,8 @@ def get_settings():
     return {
         "target": d.get("target", _DEFAULT_TARGET),
         "display": d["display"] if "display" in d else [],
-        "apis": d.get("apis") or [],
-        "active_api": d.get("active_api", ""),
+        # 内置源 id（v3）。旧的自定义 apis/active_api 模型已废弃，忽略。
+        "source": d.get("source", _DEFAULT_SOURCE),
     }
 
 
@@ -242,73 +259,51 @@ def save_settings(st):
         pass
 
 
-# ---------------------------------------------------------------- 自定义 API
-def new_api(name, url, key=""):
-    """校验并生成一条自定义 API 记录。url 里必须含 {base} 占位符。"""
-    if "{base}" not in url:
-        raise ValueError(u"地址里要包含 {base} 占位符（请求时换成基准货币）")
-    return {"id": "api%x" % (int(time.time() * 1000) % 10**12),
-            "name": name, "url": url, "key": key}
-
-
-def fetch_custom(api, base="USD"):
-    """按自定义 API 拉汇率。返回 {"rates","ts","src"} 或 None。"""
-    url = api["url"].replace("{base}", base).replace("{key}", api.get("key", ""))
+# ---------------------------------------------------------------- 汇率获取
+def _fetch_source(api):
+    """按内置源拉汇率，按各自的 JSON 结构解析。失败返回 None。"""
     try:
-        with urllib.request.urlopen(url, timeout=12) as r:
+        with urllib.request.urlopen(api["url"], timeout=10) as r:
             d = json.load(r)
     except Exception:                       # noqa: BLE001
         return None
-    # 不同 API 的汇率字段名不同：er-api 叫 rates，fastforex 叫 results
-    rates = None
-    if isinstance(d, dict):
-        rates = d.get("rates") or d.get("results")
-    if isinstance(rates, dict) and rates:
-        return {"rates": rates, "ts": int(time.time()), "src": api["name"]}
-    return None
-
-
-def _fetch_builtin():
-    """内置两个源：主源 + 备用源。urllib 会自动用 https_proxy。"""
-    try:
-        with urllib.request.urlopen(PRIMARY_URL, timeout=10) as r:
-            d = json.load(r)
-        if d.get("result") == "success" and isinstance(d.get("rates"), dict):
-            return {"rates": d["rates"],
-                    "ts": int(d.get("time_last_update_unix", 0) or 0),
-                    "src": "open.er-api.com"}
-    except Exception:                       # noqa: BLE001
-        pass
-    try:
-        with urllib.request.urlopen(FALLBACK_URL, timeout=10) as r:
-            d = json.load(r)
-        if isinstance(d.get("rates"), dict):
-            rates = dict(d["rates"])
+    kind = api["parse"]
+    if kind == "erapi":
+        rates = d.get("rates")
+        if isinstance(rates, dict) and rates:
+            return {"rates": rates,
+                    "ts": int(d.get("time_last_update_unix", 0) or time.time()),
+                    "src": api["name"]}
+    elif kind == "frankfurter":
+        rates = d.get("rates")
+        if isinstance(rates, dict) and rates:
+            rates = dict(rates)
             rates["USD"] = 1.0
-            return {"rates": rates, "ts": int(time.time()), "src": "frankfurter.app"}
-    except Exception:                       # noqa: BLE001
-        pass
+            return {"rates": rates, "ts": int(time.time()), "src": api["name"]}
+    elif kind == "jsdelivr":
+        raw = d.get("usd")
+        if isinstance(raw, dict) and raw:
+            rates = {k.upper(): v for k, v in raw.items()}
+            return {"rates": rates, "ts": int(time.time()), "src": api["name"]}
     return None
 
 
 def fetch_rates():
-    """按当前生效的源拉汇率：自定义优先，失败回落内置。"""
-    st = get_settings()
-    if st["active_api"]:
-        for api in st["apis"]:
-            if api["id"] == st["active_api"]:
-                data = fetch_custom(api)
-                if data:
-                    return data
-                break                       # 自定义失败 → 回落内置兜底
-    return _fetch_builtin()
+    """按当前生效的内置源拉汇率；失败按源顺序挨个回落。"""
+    cur = get_settings()["source"]
+    apis = sorted(BUILTIN_APIS, key=lambda a: 0 if a["id"] == cur else 1)
+    for api in apis:
+        data = _fetch_source(api)
+        if data:
+            return data
+    return None
 
 
 # ---------------------------------------------------------------- 缓存
 def load_rates(force=False):
     """带缓存的汇率读取：同一源 1 小时内直接用缓存；换源或过期重新拉。"""
     st = get_settings()
-    cur_api = st["active_api"]
+    cur_api = st["source"]
     data = None
     if not force and os.path.isfile(_CACHE_FILE):
         data = _read_json(_CACHE_FILE)

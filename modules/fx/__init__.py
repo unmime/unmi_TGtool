@@ -11,9 +11,9 @@
       /fx 100 usd cny      → 换算
       /fx set eur          → 设置默认目标币
       /fx refresh          → 强制刷新汇率
-      /fx addapi 名字 地址 [密钥] → 添加自定义汇率源
-      /fx delapi 名字      → 删除自定义源
-      /fx useapi 名字      → 切换汇率源
+
+汇率源：内置 4 个免费源（open.er-api.com 默认 / frankfurter / currency-api /
+exchangerate-api v4），在 /fx 的「汇率源」页点一个切换，不用配 key。
 
 触发门槛（防误伤闲聊）：
   - 用了中文/符号别名（"100美元"）→ 响应
@@ -39,8 +39,6 @@ fx.SETTINGS_FILE = os.path.join(_DATA_DIR, "fx_settings.json")
 _CB = "fxset"          # callback_data 前缀：fxset:动作:参数
 _BTN_PER_ROW = 3       # 货币按钮每行 3 个（带国旗+名字，3 个不超宽）
 
-# 添加自定义 API 的向导状态：chat_id → True（等用户发「名字 地址 [密钥]」）
-_PENDING_ADD = {}
 # 「直接输入」选货币的向导状态：chat_id → True（等用户发货币/国家名）
 _PENDING_TYPEIN = {}
 
@@ -147,42 +145,18 @@ def _menu_picker(kind, page):
 
 def _menu_api():
     st = fx.get_settings()
-    lines = [u"🔌 <b>汇率源</b>", ""]
-    cur = st["active_api"]
-    if not cur:
-        lines.append(u"当前：<b>内置</b>（open.er-api.com）")
-    kb = [[{"text": _tag(u"内置（open.er-api.com）", not cur),
-            "callback_data": "%s:api:use:" % _CB}]]
-    for a in st["apis"]:
-        if a["id"] == cur:
-            lines.append(u"当前：<b>%s</b>" % a["name"])
-        kb.append([{"text": _tag(a["name"], a["id"] == cur),
-                    "callback_data": "%s:api:use:%s" % (_CB, a["id"])},
-                   {"text": u"🗑 删除", "callback_data": "%s:api:del:%s" % (_CB, a["id"])}])
-    lines += ["", u"<i>点「添加」进入向导，直接发配置就行</i>"]
-    kb.append([{"text": u"➕ 添加自定义 API", "callback_data": "%s:api:add" % _CB}])
+    cur = st["source"]
+    lines = [u"🔌 <b>汇率源</b>（免费源，点一个切换）", ""]
+    kb = []
+    for a in fx.BUILTIN_APIS:
+        on = a["id"] == cur
+        lines.append(u"%s <b>%s</b> — %s" % (u"🟢" if on else u"⚪", a["name"], a["desc"]))
+        kb.append([{"text": _tag(a["name"], on),
+                    "callback_data": "%s:api:use:%s" % (_CB, a["id"])}])
     kb.append(_BACK_CLOSE)
     return u"\n".join(lines), kb
 
 
-_TYPEIN_GUIDE = (
-    u"✏️ <b>直接输入货币</b>\n\n"
-    u"把货币或国家名发给我，<b>连着写</b>或用空格/逗号隔开都行：\n"
-    u"<code>美金人民币日元澳大利亚印度</code>\n"
-    u"<code>usd eur 日本 澳洲</code>\n\n"
-    u"认出来的自动勾选，没认出来的会告诉你。\n"
-    u"发「取消」退出")
-
-_ADD_GUIDE = (
-    u"➕ <b>添加自定义汇率 API</b>\n\n"
-    u"把这条信息<b>直接发给我</b>（一条消息）：\n"
-    u"<b>名字 地址 [密钥]</b>\n\n"
-    u"例（fastforex）：\n"
-    u"<code>fastforex https://api.fastforex.io/fetch-all?api_key={key}&amp;from={base} 你的key</code>\n\n"
-    u"· 地址里 {base} 会替换成基准货币，{key} 替换成密钥\n"
-    u"· 返回的 JSON 里要有 <code>rates</code> 或 <code>results</code> 字段\n"
-    u"· 我会先试拉一次，成功失败都会明确告诉你\n\n"
-    u"发 <code>/fx</code> 或「取消」随时退出")
 
 
 def _find_api(st, key):
@@ -270,10 +244,6 @@ class Plugin(Module):
 
     # ------------------------------------------------------------- 消息
     def on_message(self, text, chat_id):
-        # 添加 API 向导优先：用户在向导里发的任何消息都按配置处理
-        if chat_id in _PENDING_ADD:
-            self._handle_add_wizard(text, chat_id)
-            return True
         if chat_id in _PENDING_TYPEIN:
             self._handle_typein_wizard(text, chat_id)
             return True
@@ -302,12 +272,10 @@ class Plugin(Module):
         st = fx.get_settings()
 
         if action == "close":
-            _PENDING_ADD.pop(chat_id, None)
             self.ctx.delete(chat_id, message_id)
             self.ctx.answer(cb_id, u"已收起")
             return True
         if action == "open":
-            _PENDING_ADD.pop(chat_id, None)
             t, kb = _menu_main()
             self.ctx.edit(chat_id, message_id, t, kb)
             self.ctx.answer(cb_id, u"已更新")
@@ -365,33 +333,24 @@ class Plugin(Module):
             self.ctx.edit(chat_id, message_id, t, kb)
             self.ctx.answer(cb_id, "")
             return True
-        if action == "api" and len(parts) >= 3 and parts[2] == "add":
-            _PENDING_ADD[chat_id] = True
-            self.ctx.edit(chat_id, message_id, _ADD_GUIDE,
-                          [[{"text": u"❌ 取消", "callback_data": "%s:open" % _CB}]])
-            self.ctx.answer(cb_id, u"请按提示把配置发给我")
-            return True
         if action == "api" and len(parts) >= 3 and parts[2] == "use":
-            api_id = parts[3] if len(parts) > 3 else ""
-            if api_id and not _find_api(st, api_id):
+            src = parts[3] if len(parts) > 3 else ""
+            if not any(a["id"] == src for a in fx.BUILTIN_APIS):
                 self.ctx.answer(cb_id, u"⚠️ 这个源不存在")
                 return True
-            st["active_api"] = api_id
+            st["source"] = src
             fx.save_settings(st)
             fx.load_rates(force=True)       # 切源后立刻刷新缓存
             t, kb = _menu_api()
             self.ctx.edit(chat_id, message_id, t, kb)
             self.ctx.answer(cb_id, u"✅ 已切换")
             return True
-        if action == "api" and len(parts) >= 3 and parts[2] == "del":
-            api_id = parts[3]
-            st["apis"] = [a for a in st["apis"] if a["id"] != api_id]
-            if st["active_api"] == api_id:
-                st["active_api"] = ""
+            st["active_api"] = api_id
             fx.save_settings(st)
+            fx.load_rates(force=True)       # 切源后立刻刷新缓存
             t, kb = _menu_api()
             self.ctx.edit(chat_id, message_id, t, kb)
-            self.ctx.answer(cb_id, u"🗑 已删除")
+            self.ctx.answer(cb_id, u"✅ 已切换")
             return True
         self.ctx.answer(cb_id, u"⚠️ 未知的操作")
         return True
@@ -435,52 +394,11 @@ class Plugin(Module):
                                  "callback_data": "%s:cur:page:0" % _CB},
                                 {"text": u"✔ 完成", "callback_data": "%s:open" % _CB}]])
 
-    def _handle_add_wizard(self, text, chat_id):
-        raw = text.strip()
-        if raw in (u"取消", "/fx", "/cancel"):
-            _PENDING_ADD.pop(chat_id, None)
-            self.ctx.send(u"已取消添加。/fx 回菜单")
-            return
-        m = re.match(r"^(\S+)\s+(\S+)(?:\s+(\S+))?$", raw)
-        if not m:
-            self.ctx.send(
-                u"⚠️ 没读出配置。格式是：<b>名字 地址 [密钥]</b>\n"
-                u"例：<code>fastforex https://api.fastforex.io/fetch-all?api_key={key}&amp;from={base} 你的key</code>\n"
-                u"重发一次，或发「取消」退出")
-            return
-        name, url, key = m.group(1), m.group(2), m.group(3) or ""
-        if not url.lower().startswith("http"):
-            self.ctx.send(u"⚠️ 第二段要是 API 地址（以 http 开头）。重发一次，或发「取消」退出")
-            return
-        try:
-            api = fx.new_api(name, url, key)
-        except ValueError as e:
-            self.ctx.send(u"⚠️ %s\n重发一次，或发「取消」退出" % fx.esc(e))
-            return
-        self.ctx.send(u"⏳ 正在试拉「%s」验证连通性…" % fx.esc(name))
-        data = fx.fetch_custom(api)
-        if not data:
-            self.ctx.send(
-                u"⚠️ <b>添加失败</b>：从「%s」拉不到数据\n"
-                u"检查：地址里 {base}/{key} 占位、密钥是否正确、"
-                u"返回的 JSON 有没有 <code>rates</code> 或 <code>results</code> 字段。\n"
-                u"重发一次，或发「取消」退出" % fx.esc(name))
-            return
-        st = fx.get_settings()
-        st["apis"] = [a for a in st["apis"] if a["name"] != name]
-        st["apis"].append(api)
-        fx.save_settings(st)
-        _PENDING_ADD.pop(chat_id, None)
-        self.ctx.send(
-            u"✅ <b>添加成功</b>：「%s」（%d 个币种）\n"
-            u"到 /fx → 🔌 汇率源 里切换启用" % (fx.esc(name), len(data["rates"])),
-            buttons=[[{"text": u"🔌 去切换", "callback_data": "%s:api:open" % _CB}]])
 
     # ------------------------------------------------------------- 命令
     def on_command(self, cmd, args, chat_id):
         if cmd != "fx":
             return PASS
-        _PENDING_ADD.pop(chat_id, None)     # 发 /fx 一律退出向导
         _PENDING_TYPEIN.pop(chat_id, None)
         arg = (args or "").strip()
         if not arg:
@@ -511,61 +429,6 @@ class Plugin(Module):
             st["target"] = code
             fx.save_settings(st)
             self.ctx.send(u"✅ 默认目标币已设为 %s（%s）" % (code, fx.cn_name(code)))
-            return None
-
-        # ---- 自定义 API 管理（命令路径，给习惯打字的用户）----
-        m = re.match(r"^(?:addapi|add)\s+(\S+)\s+(\S+)(?:\s+(\S+))?$", arg, re.I)
-        if m:
-            name, url, key = m.group(1), m.group(2), m.group(3) or ""
-            try:
-                api = fx.new_api(name, url, key)
-            except ValueError as e:
-                self.ctx.send(u"⚠️ %s" % fx.esc(e))
-                return None
-            self.ctx.send(u"⏳ 正在试拉一次验证连通性…")
-            data = fx.fetch_custom(api)
-            if not data:
-                self.ctx.send(u"⚠️ <b>添加失败</b>：拉不到数据。检查地址/{base}/{key} 占位、密钥，"
-                              u"以及返回的 JSON 有没有 rates 或 results 字段")
-                return None
-            st = fx.get_settings()
-            st["apis"] = [a for a in st["apis"] if a["name"] != name]
-            st["apis"].append(api)
-            fx.save_settings(st)
-            self.ctx.send(u"✅ <b>添加成功</b>：「%s」（%d 个币种）。在 /fx 的「汇率源」里切换启用"
-                          % (fx.esc(name), len(data["rates"])))
-            return None
-        m = re.match(r"^(?:delapi|del)\s+(.+)$", arg, re.I)
-        if m:
-            name = m.group(1).strip()
-            st = fx.get_settings()
-            api = _find_api(st, name)
-            if not api:
-                self.ctx.send(u"没找到叫「%s」的自定义源" % fx.esc(name))
-                return None
-            st["apis"] = [a for a in st["apis"] if a["id"] != api["id"]]
-            if st["active_api"] == api["id"]:
-                st["active_api"] = ""
-            fx.save_settings(st)
-            self.ctx.send(u"🗑 已删除「%s」" % api["name"])
-            return None
-        m = re.match(r"^(?:useapi|use)\s+(.+)$", arg, re.I)
-        if m:
-            name = m.group(1).strip()
-            st = fx.get_settings()
-            if name in ("builtin", u"内置", "default", ""):
-                st["active_api"] = ""
-                fx.save_settings(st)
-                self.ctx.send(u"✅ 已切回内置汇率源")
-                return None
-            api = _find_api(st, name)
-            if not api:
-                self.ctx.send(u"没找到叫「%s」的自定义源" % fx.esc(name))
-                return None
-            st["active_api"] = api["id"]
-            fx.save_settings(st)
-            fx.load_rates(force=True)
-            self.ctx.send(u"✅ 已切换到「%s」" % api["name"])
             return None
 
         # ---- 换算（同消息路径）----
