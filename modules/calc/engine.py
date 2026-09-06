@@ -87,6 +87,10 @@ class CalcError(Exception):
     pass
 
 
+class AnsExpired(CalcError):
+    """上次结果已过期/缺失 —— 上层选择静默而不是弹提示。"""
+
+
 def _insert_implicit_mul(s):
     """隐式乘法补乘号：数字/括号/常量直接相连时插入 *。
 
@@ -923,9 +927,14 @@ def calc_msgs(raw):
     if cont:
         prev = get_ans()
         if prev is None:
-            raise CalcError(_ans_missing_hint())
-        shown = format_value(prev)[0] + expr   # 展示时把上次结果展开，如 6+3
-        expr = "ans" + expr
+            # 上次结果过期/缺失：纯数字（如 -1）就当普通数算；其它（+56）上层静默不提示
+            if re.fullmatch(r"[+-]?\d+(?:\.\d+)?", expr):
+                shown = expr
+            else:
+                raise AnsExpired(_ans_missing_hint())
+        else:
+            shown = format_value(prev)[0] + expr   # 展示时把上次结果展开，如 6+3
+            expr = "ans" + expr
     else:
         shown = _normalize(raw)
     # ^ 视作幂

@@ -317,9 +317,10 @@ def main():
           "<code>-(3+4)=-7</code>｜<code>-7</code>｜")
     check("-3^2 是普通表达式", calc.format_result("-3^2").split("\n")[0],
           "<code>-3^2=-9</code>｜<code>-9</code>｜")
-    # 无记录时 +3 应报错而不是当 0+3
+    # 无记录时 +3 当普通数 3 算（不再报错）
     calc.clear_ans()
-    expect_err("无记录时 +3 报错", calc.format_result, "+3")
+    check("无记录时 +3 = 3", calc.format_result("+3").split("\n")[0],
+          "<code>+3=3</code>｜<code>3</code>｜")
     # 关闭后不识别
     calc.set_settings(ans_on=False)
     check("关闭后 +3 不识别", calc.looks_like_expr("+3"), False)
@@ -340,7 +341,8 @@ def main():
           "<code>100+5=105</code>｜<code>105</code>｜")
     check("exit_cont 返回提示", u"已退出连续计算" in calc.exit_cont(), True)
     check("退出后 ans 为 None", calc.get_ans(), None)
-    expect_err("退出后 +5 报错", calc.format_result, "+5")
+    check("退出后 +5 = 5（静默当普通数）", calc.format_result("+5").split("\n")[0],
+          "<code>+5=5</code>｜<code>5</code>｜")
     # 超时：把时间戳往回拨 > CONT_TIMEOUT
     calc.format_result("50")
     check("未超时 +5 生效", calc.format_result("+5").split("\n")[0],

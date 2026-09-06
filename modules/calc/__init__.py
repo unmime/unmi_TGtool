@@ -45,6 +45,8 @@ class Plugin(Module):
         try:
             for t, _kb in calc_core.calc_msgs(text):
                 self.ctx.send(t)
+        except calc_core.AnsExpired:
+            return True                     # 上次结果过期/缺失：静默，不提示
         except Exception as e:  # noqa: BLE001
             self.ctx.send(u"⚠️ %s" % calc_core.esc(e))
         return True
