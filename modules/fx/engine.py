@@ -243,6 +243,9 @@ _FULLWIDTH = {ord(f): ord(t) for f, t in zip(u"０１２３４５６７８９．
 _SEP_RE = re.compile(u"[换到至→= ]+")         # 分隔词统一当空格（/ 除外：除法要用）
 # / 和 ／ 只在独立成 token 时当分隔符（"usd/cny"），夹数字里的是除法（"66*9/8"）
 
+# 全部已知代码（法币三字码 + 加密的 3~6 位代码），供解析器认 4 字母码（usdc/usdt）
+_KNOWN_CODES = frozenset(CN_NAMES) | frozenset(CRYPTO_NAMES)
+
 _CACHE_FILE = ""          # 由框架侧指向 DATA_DIR/fx_rates.json
 SETTINGS_FILE = ""        # 由框架侧指向 DATA_DIR/fx_settings.json
 CRYPTO_CACHE_FILE = ""    # 由框架侧指向 DATA_DIR/fx_crypto.json（加密价 5 分钟独立缓存）
@@ -525,7 +528,9 @@ def parse_query_ex(text):
             if number is not None:
                 return None                 # 两个数字（如 "100 200"）不是换算
             number, expr = amt
-        elif re.fullmatch(r"[a-z]{3}", tok):
+        elif re.fullmatch(r"[a-z]{3}", tok) or (
+                re.fullmatch(r"[a-z]{4,6}", tok)
+                and tok.upper() in _KNOWN_CODES):   # 4字母码：usdc/usdt 这类
             codes.append(tok.upper())
         elif tok in (u"元", u"圆"):
             continue                        # 「新加坡元」里剩下的单位后缀
