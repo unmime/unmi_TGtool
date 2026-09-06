@@ -123,11 +123,14 @@ def _menu_main():
                      "callback_data": "%s:cur:typeinc:0" % _CB})
     kb = [
         row0,
-        [{"text": u"🔄 重置展示货币", "callback_data": "%s:cur:reset" % _CB}],
+        [{"text": u"🔄 重置法定货币", "callback_data": "%s:cur:reset" % _CB}],
         [{"text": u"🎯 默认目标 ▸", "callback_data": "%s:tgt:page:0" % _CB},
          {"text": u"💵 汇率源 ▸", "callback_data": "%s:api:open" % _CB}],
         [{"text": u"🪙 加密货币换算：%s" % (u"🟢 开" if st["crypto_on"] else u"⚪ 关"),
           "callback_data": "%s:cryptotoggle" % _CB}]]
+    if st["crypto_on"]:
+        kb.insert(2, [{"text": u"🪙 重置加密货币",
+                       "callback_data": "%s:cur:resetc" % _CB}])
     kb.append([
         {"text": u"🔄 刷新汇率", "callback_data": "%s:refresh" % _CB},
         {"text": u"❌ 收起", "callback_data": "%s:close" % _CB}])
@@ -431,11 +434,17 @@ class Plugin(Module):
             return True
         if action == "cur" and len(parts) >= 3 and parts[2] == "reset":
             st["display"] = []
+            fx.save_settings(st)
+            t, kb = _menu_main()
+            self.ctx.edit(chat_id, message_id, t, kb)
+            self.ctx.answer(cb_id, u"✅ 法定货币展示已清空")
+            return True
+        if action == "cur" and len(parts) >= 3 and parts[2] == "resetc":
             st["display_crypto"] = []
             fx.save_settings(st)
             t, kb = _menu_main()
             self.ctx.edit(chat_id, message_id, t, kb)
-            self.ctx.answer(cb_id, u"✅ 展示货币已清空")
+            self.ctx.answer(cb_id, u"✅ 加密货币展示已清空")
             return True
         if action == "cur" and len(parts) >= 3 and parts[2] == "typein":
             _PENDING_TYPEIN[chat_id] = "fiat"
