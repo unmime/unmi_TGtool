@@ -1077,8 +1077,6 @@ def settings_panel():
     # 连续计算：开关一行，开启时多一行「清除记录」
     kb.append([{"text": _tag(u"连续计算：开", ans_on) if ans_on else u"连续计算：关",
                 "callback_data": "calcset:ans:toggle"}])
-    if ans_on:
-        kb.append([{"text": u"🧹 清除上次结果", "callback_data": "calcset:ans:clear"}])
     kb.append([{"text": u"❌ 收起", "callback_data": "calcset:close"}])
     return text, kb
 
