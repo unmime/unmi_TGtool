@@ -322,6 +322,16 @@ class Plugin(Module):
             self.ctx.edit(chat_id, message_id, t, kb)
             self.ctx.answer(cb_id, u"已更新")
             return True
+        if action == "cryptoon":
+            # 一键开启（关闭提示消息上的按钮）
+            st["crypto_on"] = True
+            fx.save_settings(st)
+            fx.load_rates(force=True)
+            self.ctx.edit(chat_id, message_id,
+                          u"✅ <b>加密货币换算已开启</b>（实时价 · Binance）\n"
+                          u"再发一次刚才的换算就行")
+            self.ctx.answer(cb_id, u"🪙 已开启")
+            return True
         if action == "cryptotoggle":
             st["crypto_on"] = not st.get("crypto_on", False)
             fx.save_settings(st)
@@ -491,9 +501,12 @@ class Plugin(Module):
             self.ctx.send(u"⚠️ 汇率暂时取不到（网络问题？稍后再试）")
             return
         rates = data["rates"]
+        crypto_off_btn = [[{"text": u"🪙 一键开启加密货币换算",
+                            "callback_data": "%s:cryptoon" % _CB}]]
         if frm not in rates:
             if frm in fx.CRYPTO_NAMES:
-                self.ctx.send(u"🪙 加密货币换算当前是关闭的：/fx → 「加密货币换算」打开后再试")
+                self.ctx.send(u"🪙 加密货币换算当前是关闭的，点下面按钮打开后重发即可",
+                              buttons=crypto_off_btn)
                 return
             sug = _suggest(frm, fx.known_codes(data))
             self.ctx.send(u"不认识 %s%s" % (
@@ -502,8 +515,9 @@ class Plugin(Module):
         if isinstance(to, list):            # 多目标：1mjrbxjpcny → 1 USD → JPY/SGD/CNY
             unknown = [c for c in to if c not in rates]
             if unknown:
+                btn = crypto_off_btn if any(c in fx.CRYPTO_NAMES for c in unknown) else None
                 self.ctx.send(u"不认识 %s。/fx 的「展示货币」页有完整列表"
-                              % u"、".join(unknown))
+                              % u"、".join(unknown), buttons=btn)
                 return
             targets = [c for c in to if c != frm]
             if not targets:
