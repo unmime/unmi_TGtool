@@ -23,10 +23,8 @@ exchangerate-api v4），在 /fx 的「汇率源」页点一个切换，不用�
 默认不预勾选任何展示货币：新用户直接发金额时，会收到「先去设置勾选」的
 友好引导（显式指定目标的换算不受影响）。
 """
-import json
 import os
 import re
-import urllib.parse
 
 from core.base import Module, PASS
 
@@ -92,36 +90,11 @@ def _menu_main():
           "callback_data": "%s:cur:typein:0" % _CB}],
         [{"text": u"🎯 默认目标 ▸", "callback_data": "%s:tgt:page:0" % _CB},
          {"text": u"🔌 汇率源 ▸", "callback_data": "%s:api:open" % _CB}],
-        [{"text": u"📈 汇率走势图", "callback_data": "%s:chart:open" % _CB},
-         {"text": u"🔄 刷新汇率", "callback_data": "%s:refresh" % _CB}],
-        [{"text": u"❌ 收起", "callback_data": "%s:close" % _CB}],
+        [{"text": u"🔄 刷新汇率", "callback_data": "%s:refresh" % _CB},
+         {"text": u"❌ 收起", "callback_data": "%s:close" % _CB}],
     ]
     return text, kb
 
-
-def _menu_chart():
-    """走势图周期选择页。"""
-    st = fx.get_settings()
-    base, quote = _chart_pair(st)
-    text = (u"📈 <b>汇率走势图</b>\n\n"
-            u"当前曲线：<b>1 %s（%s）→ %s（%s）</b>\n"
-            u"（跟随「默认目标」设置）\n\n"
-            u"选一个周期："
-            % (fx.cn_name(base), base, fx.cn_name(quote), quote))
-    kb = [[{"text": u"📅 近 7 天", "callback_data": "%s:chart:show:7" % _CB},
-           {"text": u"📅 近 14 天", "callback_data": "%s:chart:show:14" % _CB}],
-          [{"text": u"📅 近 30 天", "callback_data": "%s:chart:show:30" % _CB}],
-          _BACK_CLOSE]
-    return text, kb
-
-
-def _chart_pair(st):
-    """走势图的货币对：默认目标币为目标；基准用美元，目标就是美元时取首个展示货币。"""
-    quote = st["target"]
-    if quote == "USD":
-        disp = [c for c in st["display"] if c != "USD"]
-        quote = disp[0] if disp else "CNY"
-    return "USD", quote
 
 
 def _menu_picker(kind, page):
@@ -332,16 +305,6 @@ class Plugin(Module):
             else:
                 self.ctx.answer(cb_id, u"⚠️ 刷新失败，稍后再试")
             return True
-        if action == "chart" and len(parts) >= 3:
-            sub = parts[2]
-            if sub == "open":
-                t, kb = _menu_chart()
-                self.ctx.edit(chat_id, message_id, t, kb)
-                self.ctx.answer(cb_id, "")
-                return True
-            if sub == "show" and len(parts) >= 4:
-                self._send_chart(chat_id, message_id, cb_id, parts[3])
-                return True
         if action in ("cur", "tgt") and len(parts) >= 3 and parts[2] == "page":
             t, kb = _menu_picker(action, int(parts[3]))
             self.ctx.edit(chat_id, message_id, t, kb)
@@ -400,43 +363,6 @@ class Plugin(Module):
         self.ctx.answer(cb_id, u"⚠️ 未知的操作")
         return True
 
-    # ------------------------------------------------------------- 走势图
-    def _send_chart(self, chat_id, message_id, cb_id, days_str):
-        """拉历史数据 → quickchart 折线图 URL → sendPhoto。"""
-        try:
-            days = int(days_str)
-        except ValueError:
-            days = 7
-        days = min(max(days, 7), 30)
-        st = fx.get_settings()
-        base, quote = _chart_pair(st)
-        hist = fx.chart_history(base, quote, days)
-        if not hist:
-            self.ctx.answer(cb_id, u"⚠️ 该币种暂无历史数据")
-            self.ctx.send(u"⚠️ %s（%s）暂无历史数据（走势图只覆盖 frankfurter 的主流币种）"
-                          % (fx.cn_name(quote), quote), chat_id=chat_id)
-            return
-        dates, vals = hist
-        lo, hi = min(vals), max(vals)
-        # quickchart 折线图（图片由 Telegram 服务器拉取，bot 不需要能访问它）
-        cfg = ("{type:'line',data:{labels:%s,datasets:[{label:'%s→%s',"
-               "data:%s,borderColor:'#4a90d9',pointRadius:2,fill:false}]},"
-               "options:{legend:{display:false},"
-               "title:{display:true,text:'1 %s → %s 近%d天',fontSize:16}}}"
-               % (json.dumps(dates, ensure_ascii=False),
-                  base, quote, json.dumps(vals), base, quote, days))
-        url = ("https://quickchart.io/chart?w=720&h=420&bkg=white&c="
-               + urllib.parse.quote(cfg, safe=""))
-        cap = (u"📈 1 %s（%s）→ %s（%s） 近 %d 天\n"
-               u"最低 %s · 最高 %s · 现在 %s"
-               % (fx.cn_name(base), base, fx.cn_name(quote), quote, days,
-                  fx.fmt_amt(lo), fx.fmt_amt(hi), fx.fmt_amt(vals[-1])))
-        r = self.ctx.send_photo(url, caption=cap, chat_id=chat_id)
-        if r.get("ok"):
-            self.ctx.answer(cb_id, "")
-        else:
-            self.ctx.answer(cb_id, u"⚠️ 图表生成失败")
-            self.ctx.send(u"⚠️ 走势图生成失败，稍后再试", chat_id=chat_id)
 
     # ------------------------------------------------------------- 向导
     def _handle_typein_wizard(self, text, chat_id):

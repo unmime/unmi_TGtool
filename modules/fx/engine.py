@@ -19,6 +19,7 @@ import json
 import os
 import re
 import time
+import urllib.parse
 import urllib.request
 
 # ---------------------------------------------------------------- 常量
@@ -229,6 +230,7 @@ _SEP_RE = re.compile(u"[换到至→= ]+")         # 分隔词统一当空格（
 
 _CACHE_FILE = ""          # 由框架侧指向 DATA_DIR/fx_rates.json
 SETTINGS_FILE = ""        # 由框架侧指向 DATA_DIR/fx_settings.json
+CRYPTO_CACHE_FILE = ""    # 由框架侧指向 DATA_DIR/fx_crypto.json（加密价 5 分钟独立缓存）
 
 _DEFAULT_TARGET = "CNY"
 _DEFAULT_DISPLAY = ["USD", "EUR", "HKD", "JPY", "KRW"]
@@ -300,62 +302,88 @@ def _fetch_source(api):
 
 
 def fetch_rates():
-    """按当前生效的内置源拉汇率；失败按源顺序挨个回落。
-    法币之外再补主流加密货币（jsdelivr 兼作加密数据源，自身已含则跳过）。"""
+    """按当前生效的内置源拉法币汇率；失败按源顺序挨个回落。
+    加密货币在 load_rates 层单独合并（独立 5 分钟短缓存）。"""
     cur = get_settings()["source"]
     apis = sorted(BUILTIN_APIS, key=lambda a: 0 if a["id"] == cur else 1)
     for api in apis:
         data = _fetch_source(api)
         if data:
-            if api["id"] != "jsdelivr":     # jsdelivr 本身就带加密货币
-                data["rates"] = _merge_crypto(data["rates"])
             return data
     return None
 
 
 def _merge_crypto(rates):
-    """从 currency-api 把主流加密货币的汇率补进 rates（已有键不覆盖）。"""
-    data = _fetch_source(_CRYPTO_API)
-    if not data:
+    """给 rates 补加密货币：实时价（binance.vision → OKX）优先，回落 currency-api 日线。"""
+    cr = _crypto_rates()
+    if not cr:
         return rates
     merged = dict(rates)
     for code in CRYPTO_NAMES:
-        if code not in merged and code in data["rates"]:
-            merged[code] = data["rates"][code]
+        if code in cr:
+            merged[code] = cr[code]
     return merged
 
 
-# ---------------------------------------------------------------- 历史走势
-def chart_history(base, quote, days):
-    """拉 base→quote 近 days 天的日收盘价（frankfurter，欧央行数据）。
+# ---------------------------------------------------------------- 加密实时价
+CRYPTO_TTL = 300             # 加密价独立缓存 5 分钟（法币 1 小时，加密波动快）
 
-    返回 (日期列表[MM-DD], 汇率列表)；该币种没历史数据返回 None。
-    """
-    import datetime
-    end = datetime.date.today()
-    start = end - datetime.timedelta(days=days)
-    url = ("https://api.frankfurter.app/%s..%s?from=%s&to=%s"
-           % (start.isoformat(), end.isoformat(), base, quote))
+
+def _http_json(url, timeout=10):
+    req = urllib.request.Request(url, headers={
+        "User-Agent": "Mozilla/5.0 (compatible; unmi_TGtool/1.x)"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return json.load(r)
+
+
+def _crypto_realtime():
+    """实时加密价 {CODE: 1 CRYPTO = ? USDT}。链：binance.vision → OKX → None。"""
+    syms = ["%sUSDT" % c for c in CRYPTO_NAMES if c != "USDT"]
+    # 1) binance.vision（币安公开数据端点，无地域限制，直连）
     try:
-        req = urllib.request.Request(url, headers={
-            "User-Agent": "Mozilla/5.0 (compatible; unmi_TGtool/1.x)"})
-        with urllib.request.urlopen(req, timeout=12) as r:
-            d = json.load(r)
-    except Exception:                       # noqa: BLE001
-        return None
-    rates = d.get("rates") or {}
-    if not rates:
-        return None
-    dates, vals = [], []
-    for day in sorted(rates):
-        v = rates[day].get(quote)
-        if v is None:
-            continue
-        dates.append(day[5:])               # MM-DD
-        vals.append(v)
-    if len(vals) < 2:
-        return None
-    return dates, vals
+        q = urllib.parse.quote(json.dumps(syms, separators=(",", ":")))
+        d = _http_json("https://data-api.binance.vision/api/v3/ticker/price?symbols=" + q)
+        out = {r["symbol"][:-4]: float(r["price"]) for r in d if r.get("price")}
+        if out:
+            return out
+    except Exception:                   # noqa: BLE001
+        pass
+    # 2) OKX 全 SPOT 过滤（广州直连通常被墙，作备用链）
+    try:
+        d = _http_json("https://www.okx.com/api/v5/market/tickers?instType=SPOT", timeout=15)
+        want = {"%s-USDT" % c for c in CRYPTO_NAMES if c != "USDT"}
+        out = {t["instId"][:-5]: float(t["last"])
+               for t in d.get("data", []) if t.get("instId") in want}
+        if out:
+            return out
+    except Exception:                   # noqa: BLE001
+        pass
+    return None
+
+
+def _crypto_rates():
+    """{CODE: 1 USD = ? CRYPTO}，5 分钟独立缓存。
+    链：实时（binance.vision → OKX，USDT≈USD 折算）→ currency-api 日线回落。"""
+    cache = _read_json(CRYPTO_CACHE_FILE)
+    if cache and time.time() - cache.get("fetched_at", 0) < CRYPTO_TTL \
+            and isinstance(cache.get("rates"), dict):
+        return cache["rates"]
+    out = None
+    rt = _crypto_realtime()
+    if rt:
+        out = {code: 1.0 / p for code, p in rt.items() if p > 0}
+        out["USDT"] = 1.0               # USDT≈USD
+    else:
+        data = _fetch_source(_CRYPTO_API)       # 日线回落（currency-api）
+        if data:
+            out = {c: data["rates"][c] for c in CRYPTO_NAMES if c in data["rates"]}
+    if out:
+        try:
+            with open(CRYPTO_CACHE_FILE, "w") as f:
+                json.dump({"rates": out, "fetched_at": int(time.time())}, f)
+        except Exception:               # noqa: BLE001
+            pass
+    return out
 
 
 # ---------------------------------------------------------------- 缓存
@@ -368,9 +396,10 @@ def load_rates(force=False):
         data = _read_json(_CACHE_FILE)
     if data and isinstance(data.get("rates"), dict) and \
             data.get("api", "") == cur_api and \
-            time.time() - data.get("fetched_at", 0) < CACHE_TTL and \
-            "BTC" in data["rates"]:         # 旧引擎的缓存没有加密货币 → 视为过期自愈
-        return data
+            time.time() - data.get("fetched_at", 0) < CACHE_TTL:
+        out = dict(data)
+        out["rates"] = _merge_crypto(data["rates"])   # 加密价独立 5 分钟缓存
+        return out
     fresh = fetch_rates()
     if fresh:
         fresh["fetched_at"] = int(time.time())
@@ -380,7 +409,9 @@ def load_rates(force=False):
                 json.dump(fresh, f)
         except Exception:                   # noqa: BLE001  写不进缓存不影响本次使用
             pass
-        return fresh
+        out = dict(fresh)
+        out["rates"] = _merge_crypto(fresh["rates"])
+        return out
     # 拉不到就用过期的顶着（同一源的过期数据 > 换源的旧数据）
     if data:
         return data
