@@ -276,6 +276,7 @@ def _fmt_targets(amount, frm, targets, data, expr=None):
             fx.flag(frm) or u"　", fx.cn_name(frm), frm,
             fx.fmt_amt(amount), fx.unit(frm))
     lines = [head, _divider(head)]
+    top_div = lines[-1]                 # 底部分割线与顶部同长
     for c in targets:
         out = fx.convert(amount, frm, c, rates)
         fl = fx.flag(c)
@@ -283,7 +284,7 @@ def _fmt_targets(amount, frm, targets, data, expr=None):
             fl or u"　", fx.cn_name(c),
             u"（%s）" % c if fx.cn_name(c) != c else "",
             fx.fmt_amt(out), fx.unit(c)))
-    lines.append(u"────────────")
+    lines.append(top_div)
     lines.append(u"<i>%s</i>" % data["src"])
     return u"\n".join(lines)
 
