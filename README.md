@@ -1,12 +1,10 @@
 # 🧰 unmi_TGtool — 开箱即用的自托管 Telegram 工具集
 
-> **English version: [README_EN.md](README_EN.md)** · 当前版本 **v1.0.0.0**（首个正式版）
+> 计算器 + 汇率换算 + 可插拔模块框架。零依赖（纯 Python 标准库），一台 VPS 五分钟跑起来。
 
-**零第三方依赖**（纯 Python 标准库）。一个可插拔的 Telegram 工具集框架，
-**默认装好就能当计算器用**，想加功能就往 `modules/` 里丢文件；一台机器上装多少个 bot，
-敲 `unmi` 一个终端面板全管起来。
+![version](https://img.shields.io/badge/version-v1.1.0.0-blue) ![license](https://img.shields.io/badge/license-MIT-green) ![python](https://img.shields.io/badge/python-3.10%2B-informational)
 
-拷到任意一台有 Python 3.6+ 的 Linux 机器上，**一条命令，开箱即用**。
+---
 
 ## ⚡ 一键安装（推荐）
 
@@ -20,110 +18,178 @@ bash <(curl -sL https://raw.githubusercontent.com/unmime/unmi_TGtool/main/unmi.s
 
 ```
   unmi_TGtool 控制台  集中管理本机的 Telegram 机器人
-  https://github.com/unmime/unmi_TGtool   v1.0.0.0
-
 ╔════════════════════════════════════════╗
 ║ 已装机器人：                           ║
-║ 「1」 测试1 @unmiTGtool_bot  🟩 运行中 ║
-║ ══════════════════════════════════════ ║
-║ 「2」 测试2 @ceshi21212bot   🟩 运行中 ║
-║ ══════════════════════════════════════ ║
+║ 「1」 我的bot @unmiTGtool_bot  🟩 运行中 ║
 ╚════════════════════════════════════════╝
-
   「A」 添加机器人   「T」 发送测试   「S」 开关机器人
   「R」 重启服务     「P」 配置代理   「U」 一键更新
-  「X」 卸载面板     「0」 退出
-  ──────────────────────────────────────────
-  选择（数字进入管理）:
 ```
 
 按 `A` 走三步引导（Token → Chat ID → 备注）加机器人，输完自动配置、启动并发一条测试消息。
-按数字键进单个机器人的管理页（状态 / 改配置 / 加备注 / 看日志 / 删除 / 更新）。
 
 | 面板功能 | 说明 |
 |---|---|
 | 添加机器人 | 自动识别 bot 用户名，同名/同 token 会提示；可起好认的备注名 |
 | 发送测试 | 选一个或全部，发一条测试消息验证配置 |
 | 开关机器人 | 运行中→停止，已停止→启动 |
-| 重启面板 | 重启全部机器人服务并重载控制台（确认页，可返回） |
-| 面板命令名 | 把打开面板的命令从 `unmi` 改成你喜欢的名字（如 `tg`），一键更新也会认 |
-| 单机器人重启 | 进某个机器人的管理页选「重启此机器人」 |
-| 配置代理 | 全局代理，一次配置所有机器人共用，自动同步并重启（国内服务器必备） |
+| 配置代理 | 全局代理，一次配置所有机器人共用（国内服务器必备） |
 | 一键更新 | 拉最新版，更新框架 + 所有机器人 + `unmi` 命令本身，保留各自配置 |
 | 卸载面板 | 删除所有机器人 + 控制台本身 |
 
-## 手动安装（备选）
+---
+
+## 📖 开发背景
+
+这个项目的起点很小：我常年在手机上需要**随手算数**和**查汇率**——买东西算个折扣、
+看个海淘价格折人民币、持有一点加密货币想随时知道值多少钱。
+
+市面上的方案要么是重量级 App（要联网、要注册、带广告），要么是功能单一的 bot
+（只能算数不能查汇率，或者反过来）。而我想要的其实很简单：
+
+- **一个对话框全搞定**：算数、汇率、加密货币，想到什么发什么，不用切应用；
+- **数据自己掌控**：跑在自己的 VPS 上，无第三方中转，无遥测；
+- **足够轻**：纯 Python 标准库，零第三方依赖，2G 内存的小鸡就能跑；
+- **能扩展**：今天是我自己用，明天别人也许有别的点子——所以把它做成了可插拔框架。
+
+自己用了一阵子觉得挺顺手，就整理出来分享给社区。如果你也有一台吃灰的 VPS
+和一个想要"专属工具机器人"的念头，这个项目就是为你准备的。
+
+---
+
+## 🤖 开始使用
+
+### 第 1 步：创建机器人，拿到 Token
+
+1. 在 Telegram 里找 **[@BotFather](https://t.me/BotFather)**，发送 `/newbot`；
+2. 按提示给 bot 起名字（显示名）和用户名（必须以 `bot` 结尾）；
+3. 创建成功后 BotFather 会发给你一段 **Token**，形如：
+   `1234567890:AAH8xXXXXXXXXXXXXXXXXXXXXXXXXXXXX` —— 这就是你的 bot Token，别泄露。
+
+### 第 2 步：拿到你的 Chat ID
+
+1. 在 Telegram 里找 **[@userinfobot](https://t.me/userinfobot)**，随便发一条消息；
+2. 它会回你的 `Id`，一串数字（如 `8877120599`）—— 这就是你的 Chat ID。
+
+> ⚠️ 出于安全考虑，建议只给自己用：创建 bot 后在 @BotFather 发 `/setprivacy`，
+> 并在安装完成后用 bot 给你发一条消息（面板安装时会自动发测试消息），之后 bot 只响应你的 Chat ID。
+
+### 第 3 步：一键安装
+
+服务器上以 root 执行：
 
 ```bash
-# 1) 下载（二选一）
-wget https://github.com/unmime/unmi_TGtool/releases/latest/download/unmi_TGtool.tar.gz
+bash <(curl -sL https://raw.githubusercontent.com/unmime/unmi_TGtool/main/unmi.sh)
+```
+
+按 `A` 添加机器人，依次粘贴 **Token** 和 **Chat ID**，起个备注名——完成。
+面板会自动写配置、注册 systemd 服务、启动 bot，并发一条测试消息给你。
+
+### 第 4 步：验证
+
+给你的 bot 发：
+
+```
+66*9/8
+```
+
+看到结果就说明装好了。接下来发 `100usd`、`大饼`、`22人民币` 试试汇率换算。
+
+<details>
+<summary>手动安装（备选，不界面党可展开）</summary>
+
+```bash
+# 1) 下载
+git clone https://github.com/unmime/unmi_TGtool.git /opt/unmi_TGtool
 # 或： curl -LO https://github.com/unmime/unmi_TGtool/releases/latest/download/unmi_TGtool.tar.gz
 
 # 2) 解压安装（tar 包带顶层目录 unmi_TGtool/）
-tar xzf unmi_TGtool.tar.gz && cd unmi_TGtool
-sudo ./install.sh "<BOT_TOKEN>" "<CHAT_ID>"
+sudo bash /opt/unmi_TGtool/install.sh "<BOT_TOKEN>" "<CHAT_ID>"
 
 # 3) 去 Telegram 给 bot 发 66*98
 ```
+</details>
 
-装完自动注册并启动 systemd 服务 `unmi_TGtool`，开机自启、崩了自动拉起。
+---
 
-## 计算器内置功能
+## ✨ 功能模块
 
-| 能力 | 示例 |
-|---|---|
-| 直接发算式 | `66*98` → `66*98=6468｜6468｜` |
-| 结果两段可复制 | 点左边复制整段，点右边只复制结果 |
-| 中文读法 | `自然读法：六千四百六十八` |
-| 会计大写（央行规范） | `会计大写：陆仟肆佰陆拾捌元整` |
-| 精确运算 | 全程 `Fraction`，`0.1+0.2` 就是 `0.3`，`2^64` 精确 |
-| 设置面板 `/calc` | 小数位 1~6 / 显示格式 / 结果转换 / 连续计算 |
-| 连续计算（默认关） | `3+3`=6，发 `+3` → `6+3=9`；`/00` 退出；3 分钟自动超时 |
-| 函数与常量 | `sqrt` `cbrt` `abs` `floor` `ceil` `round` `trunc` `sign` `ln` `log` `log2` `log10` `exp` `sin` `cos` `tan` `asin` `acos` `atan` `sinh` `cosh` `tanh` `factorial` `pow` `nthroot` `hypot` `gcd` `lcm` `comb`/`nCr` `perm`/`nPr` `gamma` `max` `min` `avg` `sum`、`pi` `e` `tau` `phi` |
-| 括号 | `()` `[]` `{}` 混着写都认，`{[(2+3)]*4}` 照常计算 |
-| 科学计数法 | `1e5` `2.5e-3`；写了一半的 `1e` 会明确报错，不会算成「1×自然常数」 |
-| 安全 | AST 白名单求值，**不用 `eval`**；`__import__`/`open`/属性访问全部拒绝 |
+每个模块都有独立介绍页，点标题进入：
 
-## 可插拔框架
+| 模块 | 一句话介绍 | 详细文档 |
+|---|---|---|
+| 🧮 **计算器 calc** | 算式、中文读法、会计大写、连续计算、与汇率联动 | **[docs/calc.md](docs/calc.md)** |
+| 💱 **汇率换算 fx** | 法币 + 加密货币，中英文名/黑话/ISO 全认识，多币种一发出 | **[docs/fx.md](docs/fx.md)** |
+| 🧪 **示例 demo** | 模块开发的最小参考实现（/ping /echo） | **[docs/demo.md](docs/demo.md)** |
+| 🛠 **模块框架** | 可插拔架构：坏模块隔离、依赖声明、独立配置、完整生命周期 | **[docs/MODULE_GUIDE.md](docs/MODULE_GUIDE.md)** |
 
-核心是 `main.py`（统一入口，不含业务）+ `modules/`（功能模块）。
+用 `/modules` 随时开关任何一个模块，互不影响。
 
-```
-main.py                  统一入口：初始化 / 装配 / 调度 / 轮询（不含业务逻辑）
-core/                    框架内核，模块只依赖它
-├── base.py              Module 基类 + 返回值约定 + JSON 读写
-├── registry.py          模块注册表：发现 / 校验 / 加载 / 生命周期
-├── config.py            配置加载（环境变量 + data/modules.json）
-├── tg.py                Telegram API 封装（BotContext）
-└── log.py               统一日志
-modules/
-├── calc/                计算器（默认启用，包形态）
-│   ├── __init__.py      导出 Plugin
-│   └── engine.py        求值核心，不依赖框架，可单独跑自测
-└── demo.py              示例模块（/ping /echo，默认不启用）
-data/                    运行数据（不进代码仓库）
-├── modules.json         启用哪些模块（顺序即优先级）
-└── <模块名>.json        各模块自己的配置
-docs/MODULE_GUIDE.md     模块开发规范
+---
+
+## 🧮 计算器（calc）速览
+
+```text
+66*9/8        → 74.25（支持 + - * / ^ % // 括号）
+1,500+1       → 千分位、小数都认
++56           → 连续计算：上次结果 + 56
+66*9/8 后补 mj → 上次结果直接换算成美元
 ```
 
-### 新增一个模块（3 步，不用改 main.py）
+设置面板 `/calc`：小数位（1~6）、结果显示格式、中文读法/会计大写（独立开关）、
+连续计算开关。命令：`/00` 退出连续计算、`/11` 开启连续计算。
+
+👉 完整功能列表见 **[docs/calc.md](docs/calc.md)**
+
+## 💱 汇率换算（fx）速览
+
+```text
+22人民币       → 中文名直接发
+100usd        → 按展示单多币种换算
+1mjrbxjpcny   → 美元→日元→人民币→加元 链式换算
+大饼 / 0.5btc  → 加密货币（Binance/OKX 实时价）
+100usd cny    → 指定目标换算
+66*9/8mj      → 算式结果直接换汇率
+```
+
+菜单 `/fx`：展示货币管理（法币/加密分开）、汇率源切换（4 个法币源 + 3 个加密源）、
+加密换算开关。汇率缓存：法币 1 小时、加密 5 分钟。
+
+👉 完整功能列表见 **[docs/fx.md](docs/fx.md)**
+
+---
+
+## 🛠 开发者接入指南
+
+unmi_TGtool 的核心是一个**可插拔模块框架**：主程序不认识任何具体模块，只按
+`enabled` 列表去 `modules/` 里找模块、按统一接口问「这条消息你管不管」，谁先举手给谁。
+模块崩了自己扛，不拖累别人——这也是"任何模块的开关都不影响其他功能"的架构保证。
+
+### 三步接入一个新模块
 
 | 步骤 | 做什么 |
 |---|---|
-| 1 | 写 `modules/mymodule.py`，导出 `Plugin(Module)` 类（参考 `modules/demo.py`） |
+| 1 | 写 `modules/mymodule.py`，导出 `Plugin(Module)` 类（最小参考：[docs/demo.md](docs/demo.md) 与 `modules/demo.py`） |
 | 2 | `data/modules.json` 的 `enabled` 里加 `"mymodule"` |
-| 3 | `sudo systemctl restart unmi_TGtool` |
+| 3 | `sudo systemctl restart unmi_TGtool` —— 不用改 `main.py` 任何一行 |
 
-框架提供了这些开箱能力，详细约定见 **[模块开发规范](docs/MODULE_GUIDE.md)**：
+### 接入规范
 
-| 能力 | 说明 |
+| 规范 | 说明 |
 |---|---|
-| 坏模块隔离 | 导入失败、缺元信息、重名、依赖缺失 → 跳过它并在日志说明原因，其它模块照常 |
+| 统一接口 | 实现 `on_message` / `on_command` / `on_callback` / `on_start` / `on_stop`，不需要的返回 `PASS` |
+| 谁先举手给谁 | 模块按 `enabled` 顺序调度，处理了就返回 `True`，不处理返回 `False` 传给下一个 |
+| 坏模块隔离 | 导入失败、缺元信息、重名、依赖缺失 → 跳过并日志说明，其它模块照常 |
 | 依赖声明 | `requires = ["其他模块名"]`，加载时校验顺序，缺依赖不会带病启动 |
 | 独立配置 | `self.load_config()` / `self.save_config()`，落在 `DATA_DIR/<模块名>.json`，原子写 |
-| 完整生命周期 | `on_start` / 消息 / 命令 / 按钮回调 / 定时报告 / `on_stop`（systemd 停止时触发） |
-| 模块异常隔离 | 每个方法调用都包 try/except，一个模块崩了不影响别人和整条消息流 |
+| 异常隔离 | 每个方法调用都包 try/except，一个模块崩了不影响别人和整条消息流 |
+| 引擎与界面分离 | 复杂逻辑放 `engine.py`（不依赖框架，可独立跑自测），`__init__.py` 只做适配 |
+| 自测义务 | 交付模块请附带 `selftest_<模块名>.py`，参考 `selftest_calc.py`（237 条） |
+| 开关独立 | 任何模块的启用/停用不得影响其它模块——框架已保证，模块自身也不要有跨模块副作用 |
+
+完整接口说明、生命周期、消息/回调数据结构，见 **[docs/MODULE_GUIDE.md](docs/MODULE_GUIDE.md)**。
+
+---
 
 ## ⚠️ 一个 token 只能有一个轮询进程
 
@@ -138,11 +204,11 @@ sudo journalctl -u unmi_TGtool -f
 sudo systemctl restart unmi_TGtool      # 改完代码必须重启
 
 cd /opt/unmi_TGtool
-sudo python3 selftest_public.py         # 框架 + 模块注册（离线，20 条）
-sudo python3 selftest_calc.py           # 计算器核心（离线，203 条）
+sudo python3 selftest_public.py         # 框架 + 模块自测（离线，20 条）
+sudo python3 selftest_calc.py           # 计算器核心（离线，237 条）
+sudo python3 selftest_fx.py             # 汇率换算核心（离线，114 条）
 sudo python3 main.py --modules          # 列出所有模块及状态（坏模块直接显示原因）
 sudo python3 main.py --dry-run          # 按 enabled 实际加载一遍，不开始轮询
-sudo python3 main.py --report daily     # 手动触发一次定时报告
 ```
 
 ## 卸载
