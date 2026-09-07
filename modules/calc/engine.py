@@ -1034,10 +1034,10 @@ def settings_panel():
     if not ans_on:
         ans_txt = u"关闭（发 /11 开启）"
     elif prev is None:
-        ans_txt = (u"开启（暂无记录 · 可先算一个式子再补币种 · /00 退出）" if not s.get("ans")
-                   else u"开启（已超时 · /00 退出）")
+        ans_txt = (u"开启（暂无记录 · /11 开启 · /00 退出）" if not s.get("ans")
+                   else u"开启（已超时 · /11 开启 · /00 退出）")
     else:
-        ans_txt = u"开启 · 上次 %s · /00 退出" % format_value(prev)[0]
+        ans_txt = u"开启 · 上次 %s · /11 开启 · /00 退出" % format_value(prev)[0]
     text = (
         u"⚙️ <b>计算器设置</b>\n\n"
         u"1️⃣ <b>小数位保留</b>（当前 <b>%d</b> 位）\n"
