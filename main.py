@@ -96,6 +96,10 @@ _MODULE_CATALOG = {
         "title": u"示例模块",
         "files": ["modules/demo.py"],
     },
+    "ip": {
+        "title": u"IP 归属查询",
+        "files": ["modules/ip/__init__.py", "modules/ip/engine.py"],
+    },
 }
 
 

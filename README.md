@@ -89,6 +89,7 @@ sudo bash /opt/unmi_TGtool/install.sh "<BOT_TOKEN>" "<CHAT_ID>"
 |---|---|---|
 | 🧮 **计算器 calc** | 算式、中文读法、会计大写、连续计算、与汇率联动 | **[docs/calc.md](docs/calc.md)** |
 | 💱 **汇率换算 fx** | 法币 + 加密货币，中英文名/黑话/ISO 全认识，多币种一发出 | **[docs/fx.md](docs/fx.md)** |
+| 🌐 **IP 归属查询 ip** | 发个 IP 出运营商/ASN/机房标记，中文返回 | **[docs/ip.md](docs/ip.md)** |
 | 🧪 **示例 demo** | 模块开发的最小参考实现（/ping /echo） | **[docs/demo.md](docs/demo.md)** |
 | 🛠 **模块框架** | 可插拔架构：坏模块隔离、依赖声明、独立配置、完整生命周期 | **[docs/MODULE_GUIDE.md](docs/MODULE_GUIDE.md)** |
 
