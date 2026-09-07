@@ -170,7 +170,7 @@ def lookup(ip):
         data = _norm_ipapi(_fetch(
             u"http://ip-api.com/json/%s?fields=status,message,country,"
             u"countryCode,region,regionName,city,zip,lat,lon,timezone,"
-            u"isp,org,as,mobile,proxy,hosting,query&lang=zh" % ip))
+            u"isp,org,as,mobile,proxy,hosting,query&lang=zh-CN" % ip))
     except IPErr:
         raise                               # 保留地址等业务性失败：不降级，直接报
     except Exception:                       # noqa: BLE001  网络/解析失败 → 备源
