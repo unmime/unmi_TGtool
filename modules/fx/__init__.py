@@ -355,6 +355,16 @@ class Plugin(Module):
             return False                # 没有上一次结果 → 保持沉默（原行为）
         # 触发门槛：裸三字码不带金额不回（防 "usd"/"try" 这类闲聊误伤）
         if not q["used_alias"] and q["amount"] == 1.0:
+            # 例外：输入涉及加密币但加密开关关着 → 给一键开启引导而不是沉默
+            to_codes = q["to"] if isinstance(q["to"], list) else ([q["to"]] if q["to"] else [])
+            if not fx.get_settings().get("crypto_on") and (
+                    q["frm"] in fx.CRYPTO_NAMES or
+                    any(c in fx.CRYPTO_NAMES for c in to_codes)):
+                _PENDING_CRYPTO[chat_id] = (q["amount"], q["frm"], q["to"], text, q["expr"])
+                self.ctx.send(u"🪙 加密货币换算当前是关闭的，点下面按钮直接出结果",
+                              buttons=[[{"text": u"🪙 一键开启加密货币换算",
+                                         "callback_data": "%s:cryptoon" % _CB}]])
+                return True
             return False
         self._reply(q["amount"], q["frm"], q["to"], text, q["expr"])
         return True
