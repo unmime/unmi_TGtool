@@ -62,6 +62,14 @@ class Plugin(Module):
                 self.ctx.send(calc_core.exit_cont())
                 return None
             return PASS
+        # /11 —— 开启连续计算（与 /00 退出对应；抢在斜杠除法 /11 之前）
+        if cmd == "11":
+            if calc_core.get_settings().get("ans_on"):
+                self.ctx.send(u"连续计算已经是开启状态")
+            else:
+                calc_core.set_settings(ans_on=True)
+                self.ctx.send(u"✅ 连续计算已开启：发 <code>+3</code> 即上次结果+3，发 <code>/00</code> 退出")
+            return None
         # /0 /5 —— 连续计算的斜杠除法（开启时才识别）
         if _NUM_CMD.match(cmd) and calc_core.is_cont_input("/" + cmd):
             try:
